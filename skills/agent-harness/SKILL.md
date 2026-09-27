@@ -34,6 +34,19 @@ mkdir -p ~/.agents/skills/<name>
 
 `description` 决定模型是否加载该 skill，写成 "Helps with X" 这种会失效。
 
+## 第三方依赖
+
+skill 目录下的第三方集由 `skills` CLI 管理（`skills add` / `update` / `remove`），
+锁定在 `.skill-lock.json`。**不要把它们 vendor 进仓库**——依赖产物不入库，
+声明入库。
+
+注意 `skills list` 会把自有 skill 也列进它的清单（标为 `Source: local`），
+不要用 `skills remove` 的交互式全选清理。
+
+APM（Microsoft Agent Package Manager）虽然更全，但装不了本机这批第三方 skill
+（它们来自 `well-known` 源，APM 不支持），且默认也写 `.agents/skills/` 会撞目录。
+详见 `README.md` 的「第三方依赖的管理」。
+
 ## 排错
 
 | 症状 | 检查 |

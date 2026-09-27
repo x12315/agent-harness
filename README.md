@@ -103,6 +103,57 @@ printf '{"id":"1","type":"get_commands"}\n' | pi --mode rpc
 首次引导时实测结果：31 个命令，含 28 个第三方 `lark-*`、自有 `agent-harness`
 （`baseDir: ~/.agents`）、以及经软链加载的 `handoff` extension；stderr 为空。
 
+## 第三方依赖的管理
+
+三种东西要分开，混了就会出问题：
+
+| 类别 | 例子 | 管理机制 | 入库？ |
+| --- | --- | --- | --- |
+| 第三方 skill | `skills/lark-*/` | `skills` CLI，锁定在 `.skill-lock.json` | ❌ 不 vendor |
+| 依赖清单 | `.skill-lock.json` | 归 git 管 | ✅ |
+| 自有 skill | `skills/agent-harness/` | 直接写 | ✅ |
+
+原则与 `node_modules` / `package-lock.json` 相同：**依赖产物不入库，声明入库。**
+这样仓库只有几百行，换机器靠 lockfile 复现。
+
+### 为什么不用 APM
+
+Microsoft APM 是这个领域功能最全的管理器（skills / prompts / agents / hooks /
+plugins / MCP / LSP 一起管，有 lockfile、policy、audit，覆盖 copilot / claude /
+cursor / codex / gemini / windsurf / kiro / opencode / grok-build）。
+但对本仓库它**不适用**：
+
+1. **装不了现有的第三方集。** 28 个 lark skill 全部是 `sourceType: well-known`
+   （`https://open.feishu.cn/lark-cli/skills/regular/.well-known/agent-skills/*.tar.gz`）。
+   APM 的源类型只有 git repo / 本地路径 / bundle / marketplace / registry，
+   其 CLI 参考中 `well-known` 出现 0 次。换过去等于丢掉这 28 个 skill。
+2. **会撞目录。** APM 默认把 skill 部署到 `.agents/skills/`（传
+   `--legacy-skill-paths` 才用各家私有路径），与 `skills` CLI 的安装目标完全
+   相同。两个管理器写同一个目录，谁都不是权威。
+
+结论：**`skills` CLI 是当前唯一选择**，不是因为它最好，而是因为它是唯一能复现
+现有第三方集的。pi 不在 APM 的 target 列表里（可用 `--target agent-skills` 间接
+覆盖），但这不是决定因素。
+
+### 如果将来要迁到 APM
+
+先确认要装的第三方源都能被 APM 表达，再把自有 skill 移出 `skills/`（见下），
+避免两个管理器争抢 `.agents/skills/` 的所有权。
+
+### 共享目录的固有风险
+
+`~/.agents/skills/` 既是**多个管理器的部署目标**，又是本仓库的源目录，即
+「构建产物落在源码树里」。`.gitignore` 的白名单机制就是为这个设计的。注意
+`skills list` 会把 `agent-harness` 也列进它的清单（标为 `Source: local`），
+所以不要用 `skills remove` 的交互式全选来清理——会误删自有 skill。
+
+## 尚未版本化的东西
+
+`~/.pi/agent/settings.json` 里的 `packages` 数组（[pi
+packages](https://pi.dev/packages) 声明）目前不在本仓库里。当前是空的，所以还没
+关系；一旦开始用 `pi install`，那份声明应该按同样原则搬进来——声明入库，
+`node_modules` 之类的产物不入库。
+
 ## 已知情况
 
 - `~/.pi/agent/skills/lark-*` 是 28 个指向 `~/.agents/skills/` 的软链，属早期
