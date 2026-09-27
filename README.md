@@ -88,7 +88,25 @@ ln -sfn .agents/AGENTS.md ~/AGENTS.md
 npx skills add ...   # 或按 .skill-lock.json 复现第三方集
 ```
 
-## 已知问题
+## 验证改动是否生效
+
+`pi --mode rpc` 可以无模型调用地列出已注册的命令，用来确认 skill / extension
+是否被正确发现：
+
+```bash
+printf '{"id":"1","type":"get_commands"}\n' | pi --mode rpc
+```
+
+输出里看两项：`source=skill` 的条目（确认 `sourceInfo.baseDir` 指向 `~/.agents`）
+和 `source=extension` 的条目。stderr 应为空——有重名或格式错误会在这里报警告。
+
+首次引导时实测结果：31 个命令，含 28 个第三方 `lark-*`、自有 `agent-harness`
+（`baseDir: ~/.agents`）、以及经软链加载的 `handoff` extension；stderr 为空。
+
+## 已知情况
 
 - `~/.pi/agent/skills/lark-*` 是 28 个指向 `~/.agents/skills/` 的软链，属早期
-  安装遗留。pi 现在原生扫描 `~/.agents/skills/`，这些软链可能造成重复发现。
+  安装遗留。pi 原生扫描 `~/.agents/skills/`，但两者并存**不会**造成重复发现
+  ——pi 按解析后的真实路径去重，实测无警告。可以保留，不必清理。
+- 本仓库的 git 身份是 repo-local 的占位值（`montana <montana@localhost>`），
+  因为这台机器没有全局 `user.name` / `user.email`。推送到远端前请改成真实值。
