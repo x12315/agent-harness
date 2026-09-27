@@ -1,6 +1,113 @@
 {
   "version": 3,
+  "lastSelectedAgents": [
+    "amp",
+    "antigravity",
+    "antigravity-cli",
+    "cline",
+    "codex",
+    "cursor",
+    "deepagents",
+    "gemini-cli",
+    "github-copilot",
+    "kimi-code-cli",
+    "opencode",
+    "warp",
+    "zed"
+  ],
+  "dismissed": {},
   "skills": {
+    "agent-browser": {
+      "source": "vercel-labs/agent-browser",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/agent-browser.git",
+      "skillPath": "skills/agent-browser/SKILL.md",
+      "skillFolderHash": "9b31e495b887e4ca123960415eca69fc7e1bba28",
+      "installedAt": "2026-07-04T14:06:15.202Z",
+      "updatedAt": "2026-07-04T14:06:15.202Z"
+    },
+    "brainstorming": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/obra/superpowers.git",
+      "skillPath": "skills/brainstorming/SKILL.md",
+      "skillFolderHash": "f260c775073816860fef8a37c032ac77e2ff5821",
+      "installedAt": "2026-06-04T14:42:11.218Z",
+      "updatedAt": "2026-06-04T14:42:11.218Z"
+    },
+    "computer-use": {
+      "source": "stablyai/orca",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/stablyai/orca.git",
+      "skillPath": "skills/computer-use/SKILL.md",
+      "skillFolderHash": "2072384f53670cb61d93f4f6264ad2d8f6b5239c",
+      "installedAt": "2026-07-28T15:30:59.347Z",
+      "updatedAt": "2026-07-28T15:30:59.347Z"
+    },
+    "documentation-writer": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/github/awesome-copilot.git",
+      "skillPath": "skills/documentation-writer/SKILL.md",
+      "skillFolderHash": "016d8040a3f91c8360b1003e74fbf29f34c283f5",
+      "installedAt": "2026-08-25T08:07:55.649Z",
+      "updatedAt": "2026-08-25T08:07:55.649Z"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/skills.git",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
+      "installedAt": "2026-06-03T10:39:10.456Z",
+      "updatedAt": "2026-06-03T11:04:09.067Z"
+    },
+    "finishing-a-development-branch": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/obra/superpowers.git",
+      "skillPath": "skills/finishing-a-development-branch/SKILL.md",
+      "skillFolderHash": "97f521c5001a8b979aa297a69c4257ce8b6a0939",
+      "installedAt": "2026-07-04T14:06:10.639Z",
+      "updatedAt": "2026-07-04T14:06:10.639Z"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/anthropics/skills.git",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "skillFolderHash": "928950704df8a8b885c03de5da626331e6f29cf8",
+      "pluginName": "example-skills",
+      "installedAt": "2026-06-04T14:42:07.758Z",
+      "updatedAt": "2026-06-04T14:42:07.758Z"
+    },
+    "git-commit": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/github/awesome-copilot.git",
+      "skillPath": "skills/git-commit/SKILL.md",
+      "skillFolderHash": "883a6a7466f55a9cd9f22cf1cce2d9333fc9b998",
+      "installedAt": "2026-08-25T08:37:59.029Z",
+      "updatedAt": "2026-08-25T08:37:59.029Z"
+    },
+    "humanizer-zh": {
+      "source": "op7418/Humanizer-zh",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/op7418/Humanizer-zh.git",
+      "skillPath": "SKILL.md",
+      "skillFolderHash": "91f3d394db8419c20d67ebe22a96cf8fee0a404b",
+      "installedAt": "2026-06-19T10:33:37.382Z",
+      "updatedAt": "2026-06-19T10:33:37.382Z"
+    },
+    "ielts": {
+      "source": "YANZHANLIN/ielts-claude-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/YANZHANLIN/ielts-claude-skills.git",
+      "skillPath": "ielts/SKILL.md",
+      "skillFolderHash": "470b10cdffef398d12d253cc5ddb45ccefef9b75",
+      "installedAt": "2026-06-12T10:30:08.690Z",
+      "updatedAt": "2026-06-12T11:20:19.243Z"
+    },
     "lark-approval": {
       "source": "open.feishu.cn",
       "sourceType": "well-known",
@@ -280,7 +387,97 @@
       "wellKnownDigest": "sha256:0c527bc364ce511c6749bae39e87f593daa42ba2bf386914e5647732dfff5ec8",
       "installedAt": "2026-09-24T08:49:14.765Z",
       "updatedAt": "2026-09-24T08:49:14.765Z"
+    },
+    "make-repo-contribution": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/github/awesome-copilot.git",
+      "skillPath": "skills/make-repo-contribution/SKILL.md",
+      "skillFolderHash": "00db961c2dfb0c27be715a37bf1ddc5ad1bc7185",
+      "installedAt": "2026-08-25T08:37:59.036Z",
+      "updatedAt": "2026-08-25T08:37:59.036Z"
+    },
+    "orca-cli": {
+      "source": "stablyai/orca",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/stablyai/orca.git",
+      "skillPath": "skills/orca-cli/SKILL.md",
+      "skillFolderHash": "ee3a35c76f875ea6ebaf68947af13ba6346b13f2",
+      "installedAt": "2026-07-28T15:30:59.349Z",
+      "updatedAt": "2026-08-30T09:48:53.555Z"
+    },
+    "orchestration": {
+      "source": "stablyai/orca",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/stablyai/orca.git",
+      "skillPath": "skills/orchestration/SKILL.md",
+      "skillFolderHash": "9aa26fde93c0592e5983cdca1ccd33b402802255",
+      "installedAt": "2026-07-28T15:30:59.350Z",
+      "updatedAt": "2026-07-28T15:30:59.350Z"
+    },
+    "ponytail": {
+      "source": "DietrichGebert/ponytail",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/DietrichGebert/ponytail.git",
+      "skillPath": "skills/ponytail/SKILL.md",
+      "skillFolderHash": "1a0986741a7f119c0fee6c3769c382029c238ac8",
+      "installedAt": "2026-06-22T17:56:08.193Z",
+      "updatedAt": "2026-06-22T17:56:08.193Z"
+    },
+    "session-handoff": {
+      "source": "softaworks/agent-toolkit",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/softaworks/agent-toolkit.git",
+      "skillPath": "skills/session-handoff/SKILL.md",
+      "skillFolderHash": "9038976da9e22fa34168feb813ef18082fe005b1",
+      "installedAt": "2026-07-04T14:06:20.803Z",
+      "updatedAt": "2026-07-04T14:06:20.803Z"
+    },
+    "session-history": {
+      "source": "rohitg00/agentmemory",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/rohitg00/agentmemory.git",
+      "skillPath": "plugin/skills/session-history/SKILL.md",
+      "skillFolderHash": "215602eb80c1351f661ad912bda8b3c81ce82697",
+      "installedAt": "2026-07-04T14:06:27.171Z",
+      "updatedAt": "2026-07-04T14:06:27.171Z"
+    },
+    "using-git-worktrees": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/obra/superpowers.git",
+      "skillPath": "skills/using-git-worktrees/SKILL.md",
+      "skillFolderHash": "069a24665c6ce34ca78da57727c84e3c05e65c76",
+      "installedAt": "2026-07-04T14:06:06.447Z",
+      "updatedAt": "2026-07-04T14:06:06.447Z"
+    },
+    "using-superpowers": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/obra/superpowers.git",
+      "skillPath": "skills/using-superpowers/SKILL.md",
+      "skillFolderHash": "225dd70596c396940ff158335a954a64d93ece40",
+      "installedAt": "2026-06-04T14:42:14.641Z",
+      "updatedAt": "2026-06-04T14:42:14.641Z"
+    },
+    "writing-for-agents": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/productivity/writing-for-agents/SKILL.md",
+      "skillFolderHash": "ad2925850efb8973a72d2e666f7a975f9a2d4a9b",
+      "pluginName": "mattpocock-skills",
+      "installedAt": "2026-08-25T08:10:04.001Z",
+      "updatedAt": "2026-08-25T08:10:04.001Z"
+    },
+    "writing-plans": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/obra/superpowers.git",
+      "skillPath": "skills/writing-plans/SKILL.md",
+      "skillFolderHash": "8fe8e8b6ee9e5cbe53cb172a36f0dc31f9875847",
+      "installedAt": "2026-06-04T14:42:18.069Z",
+      "updatedAt": "2026-06-04T14:42:18.069Z"
     }
-  },
-  "dismissed": {}
+  }
 }
