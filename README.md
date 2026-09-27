@@ -43,7 +43,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | ----------------------------------------- | ----------------------------- | -------------------------------------- |
 | `AGENTS.md`                               | `~/AGENTS.md`                 | 祖先目录发现，对所有 agent 通用        |
 | `AGENTS.md`                               | `~/.pi/agent/AGENTS.md`       | pi 的全局指令只认 agent-dir 下这条路   |
-| `adapters/pi/extensions/handoff.ts`       | `~/.pi/agent/extensions/`     | pi 的 extension 是厂商私有机制         |
+| `adapters/pi/extensions/handoff.ts`       | `~/.pi/agent/extensions/handoff.ts` | pi 的 extension 是厂商私有机制（文件级软链） |
 | `skills/`                                 | —（无需投影）                 | pi 原生扫描 `~/.agents/skills/`        |
 
 若某个 harness 有自家的指令文件名（例：Claude Code 读 `CLAUDE.md`，且不在
@@ -79,16 +79,78 @@ $EDITOR ~/.agents/skills/<name>/SKILL.md
 厂商特有字段（如 pi 的 `disable-model-invocation`）不要直接写在顶层——其他
 实现不认。放 `metadata:` 里。
 
-## 在新机器上恢复
+## 特殊操作流程
+
+下面每个流程都有坑，单独记下来。
+
+### A. 新机器恢复
 
 ```bash
 git clone <this-repo> ~/.agents
-ln -sfn .agents/AGENTS.md ~/AGENTS.md
-# 按需为每个 harness 建投影，见 README 的「投影」表格
-npx skills add ...   # 或按 .skill-lock.json 复现第三方集
+ln -sfn .agents/AGENTS.md ~/AGENTS.md                          # 祖先链发现
+ln -sfn ../../.agents/AGENTS.md ~/.pi/agent/AGENTS.md          # pi 全局指令位
+ln -sfn ../../../.agents/adapters/pi/extensions/handoff.ts \
+        ~/.pi/agent/extensions/handoff.ts                      # pi extension
+npx skills add ...        # 按 .skill-lock.json 逐条复现第三方集
 ```
 
-## 验证改动是否生效
+**`skills/` 不需要任何投影**（pi 原生扫描 `~/.agents/skills/`）。装完必须做
+C 的对账——lock 是「应装清单」，不等于磁盘现状。
+
+### B. 投影的建立与拆除
+
+源永远是 `~/.agents/`，投影指向 harness 原生位置。三条规则：
+
+1. **不投影 `skills/`**。往 `~/.pi/agent/skills/` 里放指向 `~/.agents/skills/` 的
+   软链是反向冗余：pi 按**解析后的真实路径**去重，所以它能工作（实测数量不变、
+   无警告），但多一份要维护的副本。
+2. **禁止反向链**（项目 → 全局）。早期 `~/.agents/skills/ielts-writing` 直接软链
+   到 `~/Desktop/ielts_writing_helper/.agents/skills/`，使全局技能依赖某个项目的
+   存在。技能属于项目就留在项目；要全局可用，就把它作为**自有 skill** 收进
+   `skills/` 并加白名单。
+3. **`AGENTS.md` 的两条投影会各注入一次**：pi 按 symlink 路径去重（不是
+   realpath），所以 cwd 在 `~` 下时同一份指令进提示词两次（约 803B）。保留两条是
+   因为 cwd 在 `~` 之外时只有 agent-dir 那条生效。
+
+### C. lock 与磁盘对账
+
+`.skill-lock.json`（应装）与 `skills/`（实装）是两份独立数据，必须能解释差异。
+按 `sourceType` 做集合运算，输出三类：**已声明未安装**、**已安装未声明**、**一致**。
+
+本机实测（2026-09-27）：
+
+| 类别 | 数量 | 明细 |
+| --- | --- | --- |
+| lock 声明 | 48 | github 20 + well-known 28 |
+| 磁盘实装 | 27 | 已声明 github 17 + 未登记 9 + 自有 1 |
+| 已声明未安装 | 31 | 28 个 `lark-*`（well-known）+ `ielts`、`session-handoff`、`session-history` |
+| 已安装未声明 | 9 | 见下 |
+
+未登记的 9 个没有任何来源元数据（来自手工 clone 或更早的安装）：
+`book-translation`、`executing-plans`、`grilling`、`ielts-speaking`、
+`implementing-drag-drop`、`macos-design`、`self-explanatory-code`、
+`subagent-driven-development`、`ui-ux-pro-max`。
+
+未登记技能只有两条出路：**补来源**（重装或手工补 lock 条目）或**判为自有**
+（加白名单）。拖着不处理，它们既不可复现也不入库。
+
+### D. 第三方 skill 的装 / 更新 / 删
+
+```bash
+npx skills add <source>      # 安装，自动更新 lockfile
+npx skills list              # 看清单
+npx skills update            # 更新——唯一允许的更新执行者
+npx skills remove <name>     # 删除；不要用交互式全选
+```
+
+**不要用 `skills remove` 的交互式全选清理**：`skills list` 会把自有 skill
+（`agent-harness`）也列进去（标为 `Source: local`），全选会连它一起删。
+
+`well-known` 源（`lark-*`）只能由 `skills` CLI 安装——任何只认 git 的管理器都
+表达不了它们。这是「为什么不用 APM」的第一条，也是图形管理器不能接管安装的
+根本原因。
+
+### E. 验证改动是否生效
 
 `pi --mode rpc` 可以无模型调用地列出已注册的命令，用来确认 skill / extension
 是否被正确发现：
@@ -97,11 +159,51 @@ npx skills add ...   # 或按 .skill-lock.json 复现第三方集
 printf '{"id":"1","type":"get_commands"}\n' | pi --mode rpc
 ```
 
-输出里看两项：`source=skill` 的条目（确认 `sourceInfo.baseDir` 指向 `~/.agents`）
-和 `source=extension` 的条目。stderr 应为空——有重名或格式错误会在这里报警告。
+验收标准（三条都要满足）：
 
-首次引导时实测结果：31 个命令，含 28 个第三方 `lark-*`、自有 `agent-harness`
-（`baseDir: ~/.agents`）、以及经软链加载的 `handoff` extension；stderr 为空。
+1. stderr 为空——有重名或格式错误会在这里报警告
+2. `source=skill` 的每一条 `sourceInfo.baseDir` 都指向 `~/.agents`
+3. 预期的 extension 都在（本机：`handoff`、`webui`、`llama`）
+
+本机实测（2026-09-27）：33 个命令 = skill 27 + extension 3 + prompt 3，stderr 为空。
+注意 **lark 系一个都没有**（declared-not-installed，见 C），所以命令数取决于
+实际装了什么，不要拿固定数字当验收标准。
+
+### F. 回滚
+
+改动 `~/.agents` 前先留三份素材：
+
+```bash
+tar czf /tmp/agents-backup-$(date +%Y%m%d-%H%M%S).tar.gz -C ~ .agents
+cp ~/.agents/.skill-lock.json /tmp/lock-before.json
+find ~/.agents/skills -maxdepth 1 -type l -exec ls -la {} \; > /tmp/links-before.txt
+```
+
+框架文件可以用 `git reset --hard` 回退，但**第三方技能不在 git 里**——只能靠
+tar 快照或重新 `npx skills add`。
+
+### G. 绕过 clone 的 git 流程（graft）
+
+当 `github.com:443` 不可达而 `api.github.com` 正常时（实测过：`github.com` 超时、
+`api.github.com` 200），用 API 取 tarball 落地，再 graft 到远端历史：
+
+```bash
+gh api repos/<owner>/<repo>/tarball/main > /tmp/repo.tar.gz
+tar xzf /tmp/repo.tar.gz -C /tmp/stage
+cp -R /tmp/stage/*/. ~/.agents/
+cd ~/.agents && git init -b main && git remote add origin <url>
+git add -A && git commit -m "<本地提交>"
+git fetch origin && git reset --soft origin/main   # HEAD 换到远端历史，工作区/暂存区不动
+git diff --cached --stat origin/main                # 核对将要提交的差异
+git commit -m "<合并提交>"                           # 生成 origin/main 的子提交
+git push -u origin main
+```
+
+`git reset --soft` 是关键：它把远端 HEAD 变成父节点，避免产生一条无共同祖先的
+历史（直接 push 会被拒或被迫 `--force`）。
+
+**注意**：`git push` 前确认提交身份是对的。本机全局身份是
+`montana <2398925789@qq.com>`，仓库里没有 repo-local 覆盖。
 
 ## 第三方依赖的管理
 
@@ -140,6 +242,41 @@ cursor / codex / gemini / windsurf / kiro / opencode / grok-build）。
 先确认要装的第三方源都能被 APM 表达，再把自有 skill 移出 `skills/`（见下），
 避免两个管理器争抢 `.agents/skills/` 的所有权。
 
+### 只读检测：`skills-manager` CLI 与 APP 能否联动
+
+`skills-manager`（Rust 桌面 APP + 自带 CLI）是这个领域唯一按「git 库 + DB 外置
+且可由技能文件重建」设计的工具，但它的**联动条件与本仓库相撞**。
+
+能联动的部分：CLI 与 APP 共享同一套 SQLite DB、中心库和 sync engine；APP 启动
+时会把匹配版本的 CLI 发布到 `~/.skills-manager/bin/skills-manager-cli`，所以
+agent 用到的就是 APP 的版本。
+
+冲突在于 `--skills-root` 会**连 base 一起重定向**（`src-tauri/src/bin/skills-manager-cli.rs`）：
+
+```rust
+if let Some(skills_root) = &cli.skills_root {
+    let base = central_repo::external_base_dir(skills_root);  // ~/.skills-manager/external/<name>-<hash>
+    central_repo::set_runtime_base_dir_override(Some(base));
+    central_repo::set_runtime_skills_dir_override(Some(skills_root.clone()));
+}
+```
+
+于是它的 DB 落在那个 external 命名空间里，**与 APP 的库彻底隔离**——这正是它
+「external checkout 保持干净」的实现方式，也意味着这个模式**不与 APP 联动**。
+
+想要联动，只能让 APP 的 repo path 指向 `~/.agents`（`repo set-path`）、CLI 不带
+`--skills-root`。代价是三件事：
+
+1. `~/.agents/` 根下会多出 6 个状态文件：`skills-manager.db`、`scenarios/`、
+   `cache/`、`logs/`、`.skills-manager.lock`、`git-askpass.sh`（必须 gitignore）
+2. APP 成为该目录的**第二个写入方**，重演「为什么不用 APM」第 2 条
+3. APP 的 git 功能会在 `~/.agents/skills/` 里 `git init`（**嵌套仓库**），因此
+   Backup 页与 `git` 子命令必须完全不用
+
+结论：**只读检测用 CLI + `--skills-root ~/.agents/skills`**——零污染、不与 APP
+联动、也不需要装 APP。**要 APP 可视化，就必须接受它拥有这个目录**，与 `skills`
+CLI 争抢所有权。两者不可兼得。
+
 ### 共享目录的固有风险
 
 `~/.agents/skills/` 既是**多个管理器的部署目标**，又是本仓库的源目录，即
@@ -150,14 +287,21 @@ cursor / codex / gemini / windsurf / kiro / opencode / grok-build）。
 ## 尚未版本化的东西
 
 `~/.pi/agent/settings.json` 里的 `packages` 数组（[pi
-packages](https://pi.dev/packages) 声明）目前不在本仓库里。当前是空的，所以还没
-关系；一旦开始用 `pi install`，那份声明应该按同样原则搬进来——声明入库，
+packages](https://pi.dev/packages) 声明）目前**不在**本仓库里，而本机已经不是空的
+（`["npm:pi-web-ui"]`）。一旦这份声明开始变化，应按同样原则搬进来——声明入库，
 `node_modules` 之类的产物不入库。
 
 ## 已知情况
 
-- `~/.pi/agent/skills/lark-*` 是 28 个指向 `~/.agents/skills/` 的软链，属早期
-  安装遗留。pi 原生扫描 `~/.agents/skills/`，但两者并存**不会**造成重复发现
-  ——pi 按解析后的真实路径去重，实测无警告。可以保留，不必清理。
-- 本仓库的 git 身份是 repo-local 的占位值（`montana <montana@localhost>`），
-  因为这台机器没有全局 `user.name` / `user.email`。推送到远端前请改成真实值。
+- **28 个 `lark-*` 只存在于 lock，不在磁盘**。README 早先版本的「首次引导 31 个
+  命令含 28 个 lark」和「`~/.pi/agent/skills/lark-*` 有 28 个软链」描述的是一个
+  **已安装**的状态，本机不是这个状态。见 C 的对账表。
+- **`~/.pi/agent/skills/` 现在没有软链**。历史上那里有 5 条指向
+  `~/.agents/skills/` 的软链（非 lark），已按 B 的规则 1 删除；实测技能数 27→27、
+  无警告。
+- **`~/.agents/skills/.openclaude/skills/` 是一棵重复树**：22 个目录，其中 21 个与
+  上层同名目录逐字节相同，另有一个 `grill-me`。看着像 OpenClaude 的安装目标，
+  与本仓库无关。pi 的技能加载器**跳过点目录**，所以它不造成重复发现，纯占空间。
+- **git 身份来自全局配置**（`montana <2398925789@qq.com>`），仓库里没有
+  repo-local 覆盖，与早先 README 的描述不同。
+- `~/.pi/agent/skills/` 是个空目录，保留（pi 原生全局技能位，将来放厂商专用技能）。

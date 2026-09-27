@@ -29,8 +29,11 @@ mkdir -p ~/.agents/skills/<name>
 ```
 
 **必须**在同一提交里往 `.gitignore` 加一行 `!/skills/<name>/`。`.gitignore`
-默认忽略 `skills/` 全部内容（第三方安装产物 6MB+，等同 node_modules），只白名单
+默认忽略 `skills/` 全部内容（第三方安装产物约 5MB，等同 node_modules），只白名单
 放行自有 skill，忘了加白名单会导致文件不被跟踪。
+
+自有 skill 与第三方 skill **同目录**，没有「自有专用路径」。区别只在 git 跟不
+跟踪——白名单就是那条分界线。
 
 `description` 决定模型是否加载该 skill，写成 "Helps with X" 这种会失效。
 
@@ -47,13 +50,28 @@ APM（Microsoft Agent Package Manager）虽然更全，但装不了本机这批�
 （它们来自 `well-known` 源，APM 不支持），且默认也写 `.agents/skills/` 会撞目录。
 详见 `README.md` 的「第三方依赖的管理」。
 
+**不要引入任何会「拥有」`.agents/skills/` 的图形管理器**——它会与 `skills` CLI
+争抢所有权。若只要只读检测，用 `skills-manager` CLI 加
+`--skills-root ~/.agents/skills`（状态外置、不污染仓库，但不与 APP 联动）。
+两个模式的取舍见 `README.md`。
+
+## 改动前先看 README 的「特殊操作流程」
+
+那里记了七个有坑的流程：新机器恢复、投影的建立与拆除、lock 与磁盘对账、
+第三方装/更新/删、验证生效、回滚、绕过 clone 的 git graft。
+
+尤要注意对账（lock 是「应装清单」，不等于磁盘现状）和投影规则（禁止反向链、
+`skills/` 不需要投影）。
+
 ## 排错
 
 | 症状 | 检查 |
 | --- | --- |
 | skill 没出现在可用列表 | 目录下是否有**恰好**名为 `SKILL.md` 的文件；`name` 字段是否存在；`description` 是否为空（缺失则不加载） |
+| skill 在 lock 里但列表里没有 | 属于 declared-not-installed。先对账（README 的 C），例：28 个 `lark-*` 只存在于 lock |
 | 启动有重名警告 | 同一个 skill 被多处发现。检查 `~/.pi/agent/skills/` 下的遗留软链与 `~/.agents/skills/` 是否重复 |
 | 改了没生效 | 运行中的 session 需 `/reload` |
+| 要装 `lark-*` 之类 | 只能 `npx skills`（`well-known` 源），git-only 管理器装不了 |
 | 确认 pi 能看到哪些 skill | 看启动诊断，或直接 `/skill:<name>` 强制加载 |
 | `AGENTS.md` 没被读到 | 确认 `~/.pi/agent/AGENTS.md` 软链可解析（从该目录到 `~/.agents/` 要上**两**级） |
 
