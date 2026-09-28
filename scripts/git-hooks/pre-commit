@@ -1,0 +1,7 @@
+#!/bin/sh
+# Opt-in pre-commit check: keep the declaration and the disk in agreement.
+# Enable with: git config core.hooksPath scripts/git-hooks
+# Disable with: git config --unset core.hooksPath
+# Offline and fast on purpose - the pi/claude probes belong in `harness.mjs verify`.
+root=$(git rev-parse --show-toplevel)
+exec node "$root/scripts/reconcile.mjs"

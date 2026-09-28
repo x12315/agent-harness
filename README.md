@@ -308,6 +308,45 @@ git push -u origin main
 **注意**：`git push` 前确认提交身份是对的。本机全局身份是
 `montana <2398925789@qq.com>`，仓库里没有 repo-local 覆盖。
 
+## 脚本（scripts/）
+
+所有检查都在这里：纯 Node 内置模块，零第三方依赖，默认只读，重复执行安全。
+
+```bash
+node scripts/harness.mjs all            # 新机器/改动后：引导(dry run) → 对账 → 验收
+node scripts/harness.mjs all --apply    # 真的把投影写下去
+node scripts/harness.mjs bootstrap|reconcile|drift|verify [--json]
+```
+
+| 脚本 | 做什么 | 网络 |
+| --- | --- | --- |
+| `bootstrap.mjs` | 按 `managedLinks()` 把仓库投影到 harness 原生位置。默认 dry run，`--apply` 才写；遇到实体文件/目录挡路只报 `conflict`，**绝不删** | ❌ |
+| `reconcile.mjs` | 声明 vs 实装，按 `sourceType` 分类。差异必须逐条登记在 `scripts/expected-gaps.json`，否则失败 | ❌ |
+| `drift.mjs` | 把 lock 的 `wellKnownDigest` 与上游 `.well-known/agent-skills/index.json` 逐个比对；上游多出来的技能只报告、不失败 | ✅ |
+| `verify.mjs` | 四项：pi 发现、Claude Code 入口、投影都是指向仓库的软链、仓库卫生 | ✅ |
+
+退出码：`0` 通过 / `1` 有未登记的差异或检查失败 / `2` 用法或仓库状态错误。
+`verify` 里 harness 没装的检查项**跳过而不失败**（仓库在只装一个 harness 的机器上也要能用）。
+
+**版本钉住**在 `scripts/pinned-versions.json`：`skillsCli` 是脚本与文档统一使用的版本；
+`piVerifiedWith` / `claudeCodeVerifiedWith` 是实测过的版本，pi 版本不匹配时 `verify`
+只提示——升级是合法操作，但扩展依赖它导出的符号。
+
+**可选：把对账挂成 pre-commit**（只跑离线且快的 reconcile）：
+
+```bash
+git config core.hooksPath scripts/git-hooks   # 取消：git config --unset core.hooksPath
+```
+
+### 接入新 harness 的模板
+
+1. 查它是否原生读 `.agents/skills/`——是则技能零适配。
+2. 查它的全局指令文件名（pi 读 agent-dir 下的 `AGENTS.md`，Claude Code 读 `CLAUDE.md`）。
+   不同则在 `adapters/<name>/` 放兼容入口，再投影过去。
+3. 厂商私有资产（extensions / prompts / agents 之类）放 `adapters/<name>/`，原位置留软链。
+4. 在 `scripts/lib/repo.mjs` 的 `managedLinks()` 加一行，投影表也加一行。
+5. 跑 `node scripts/harness.mjs all`。
+
 ## 第三方依赖的管理
 
 三种东西要分开，混了就会出问题：
