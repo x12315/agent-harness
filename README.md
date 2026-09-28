@@ -667,6 +667,13 @@ directories from the CWD up to the root are included」——即它会读祖先�
 
 ## 已知情况
 
+- **本机 `chatgpt.com` 不通，但 `api.openai.com` 通**（2026-09-28 实测）：DNS 被 Clash
+  Verge 的 TUN/fake-IP 接管（系统、1.1.1.1、8.8.8.8 三个解析器都返回 `198.18.0.28`），
+  `https://chatgpt.com/` 根路径 `http=000`，而 `https://api.openai.com/v1/models` 返回
+  `401`（正常，只是没带 key）。Codex 走的是 `chatgpt.com/backend-api`（配置键
+  `chatgpt_base_url`），所以 headless Codex 在这条路径上必然失败——**是分流规则问题，
+  不是断网**。修法是让 `chatgpt.com` 与 `openai.com` 走同一策略组；修好后应补跑一次
+  Codex 行为验证（见「残余风险」第 10 条）。
 - **`~/.codex/config.toml` 会被 Codex 自己重写。** 实测光跑 `codex mcp list` 就把它
   规范化了：`startup_timeout_sec = 120` → `120.0`、删掉空的 `args = []`、重排 `env` 的
   键顺序。所以这个文件不适合手工精修，也**不适合像 pi 的 `settings.json` 那样整文件
