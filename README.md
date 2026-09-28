@@ -658,7 +658,28 @@ directories from the CWD up to the root are included」——即它会读祖先�
 `~/.codex/AGENTS.md`，拉取后 `bootstrap` 会把它指向本仓库这份 → **先备份并合并**你
 在两边的内容，否则会丢一份。
 
+10. **Codex 只有结构化验证，因为 headless Codex 在本机跑不通。** `codex exec` 会等
+    Codex 的 apps MCP 传输层 `https://chatgpt.com/backend-api/ps/mcp`（ChatGPT-app 那几个
+    MCP 走它），本机实测不可达（`http=000`、12s 超时）→ 会话卡在 `Reconnecting…`。
+    TUI 仍可用，只是有重试噪音；网络恢复或挂上代理后应重跑一次行为验证。所以
+    「Codex 读到了指令层」目前是**结构化**结论（`$CODEX_HOME/AGENTS.md` 是软链 +
+    首标题正确），不是行为观测。
+
 ## 已知情况
+
+- **`~/.codex/config.toml` 会被 Codex 自己重写。** 实测光跑 `codex mcp list` 就把它
+  规范化了：`startup_timeout_sec = 120` → `120.0`、删掉空的 `args = []`、重排 `env` 的
+  键顺序。所以这个文件不适合手工精修，也**不适合像 pi 的 `settings.json` 那样整文件
+  软链进仓库**——Codex 做的是整表重写，比 pi 的写穿透风险高得多。
+- **不要用 `[mcp_servers.<name>] enabled = false` 去禁用插件提供的 MCP。** 该段缺
+  transport 字段会让 Codex 直接
+  `failed to load bootstrap configuration: invalid transport`，连 `codex mcp list`
+  都跑不了（实测踩过）。要关插件自带的 MCP，用插件开关
+  `[plugins."<plugin>@openai-bundled"] enabled = false`。
+- **Codex 侧技能预算会被挤满。** 实测警告
+  `Skill descriptions were shortened to fit the skills context budget`：技能装多了描述
+  会被截断（仍可见，但描述变短）。可在 `[[skills.config]]` 里逐个禁用不用的
+  （本机目前有 2 条禁用：`documentation-writer`、`humanizer-zh`）。
 
 - **两个 harness 已接入为一等 agent**（2026-09-28）：pi、Codex。Codex 的接入最小
   ——它原生读 `AGENTS.md`（含全局 `$CODEX_HOME/AGENTS.md`）并原生扫
