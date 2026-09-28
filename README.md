@@ -44,6 +44,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `AGENTS.md`                               | `~/AGENTS.md`                 | 祖先目录发现，对所有 agent 通用        |
 | `AGENTS.md`                               | `~/.pi/agent/AGENTS.md`       | pi 的全局指令只认 agent-dir 下这条路   |
 | `adapters/pi/extensions/handoff.ts`       | `~/.pi/agent/extensions/handoff.ts` | pi 的 extension 是厂商私有机制（文件级软链） |
+| `skills/<name>/`                          | `~/.claude/skills/<name>`     | 该 harness 不读 `.agents/`，由 `skills` CLI 建软链 |
 | `skills/`                                 | —（无需投影）                 | pi 原生扫描 `~/.agents/skills/`        |
 
 若某个 harness 有自家的指令文件名（例：Claude Code 读 `CLAUDE.md`，且不在
@@ -122,8 +123,8 @@ C 的对账——lock 是「应装清单」，不等于磁盘现状。
 | 类别 | 数量 | 明细 |
 | --- | --- | --- |
 | lock 声明 | 48 | github 20 + well-known 28 |
-| 磁盘实装 | 27 | 已声明 github 17 + 未登记 9 + 自有 1 |
-| 已声明未安装 | 31 | 28 个 `lark-*`（well-known）+ `ielts`、`session-handoff`、`session-history` |
+| 磁盘实装 | 55 | 已声明 45（28 个 `lark-*` + 17 个 github）+ 未登记 9 + 自有 1 |
+| 已声明未安装 | 3 | `ielts`、`session-handoff`、`session-history` |
 | 已安装未声明 | 9 | 见下 |
 
 未登记的 9 个没有任何来源元数据（来自手工 clone 或更早的安装）：
@@ -146,9 +147,36 @@ npx skills remove <name>     # 删除；不要用交互式全选
 **不要用 `skills remove` 的交互式全选清理**：`skills list` 会把自有 skill
 （`agent-harness`）也列进去（标为 `Source: local`），全选会连它一起删。
 
-`well-known` 源（`lark-*`）只能由 `skills` CLI 安装——任何只认 git 的管理器都
-表达不了它们。这是「为什么不用 APM」的第一条，也是图形管理器不能接管安装的
-根本原因。
+#### `well-known` 源（`lark-*`）的收编
+
+飞书的「官方安装方法」就是一个标准 well-known 发现端点，**不需要飞书的下载器**：
+`https://open.feishu.cn/lark-cli/skills/regular/.well-known/agent-skills/index.json`
+（RFC 8615；`$schema: schemas.agentskills.io/discovery/0.2.0`；每个技能是
+`type: archive` + `url: ./<name>.tar.gz` + `digest: sha256:…`）。
+`skills` CLI 内置了 provider（`src/providers/wellknown.ts`），lock 里的
+`sourceBaseUrl` / `wellKnownDigest` 就是它写的。收编命令：
+
+```bash
+npx --yes skills@latest add "https://open.feishu.cn/lark-cli/skills/regular" \
+    -g -s '*' -a zed claude-code -y
+```
+
+四个坑，不知道就会装错位置：
+
+1. **必须带一个 universal agent（如 `zed`）** 才能让文件落进规范存储
+   `~/.agents/skills/`。`src/agents.ts` 里 `globalSkillsDir` 指向
+   `~/.agents/skills` 的只有 `dexto`、`kimi-code-cli`、`loaf`、`sarvam-code`、
+   `warp`、`zed`——它们是“读中立路径”的 agent。只传 `-a claude-code` 时，
+   **base 会变成 `~/.claude/skills/`**，文件复制到那里，`~/.agents/skills/` 一个都
+   没有，pi 也就看不到。正确输出里应出现 `universal: Zed` + `symlink → Claude Code`。
+2. **不要用 `--all` / `-a '*'`**。CLI 把 pi 也当目标
+   （`globalSkillsDir: ~/.pi/agent/skills`，且通过 `~/.pi/agent` 存在性自动探测），
+   全局安装会在那里重建一整套软链农场——正是 B 里拆掉的旧模型。必须显式列 agent。
+3. **`-a` 是空格分隔多值**（`-a zed claude-code`），不是逗号。
+4. **`--json` 对 well-known 源不支持**（会直接报错退出，什么都没装）。
+
+`well-known` 源只能由 `skills` CLI 安装——任何只认 git 的管理器都表达不了它们。
+这是「为什么不用 APM」的第一条，也是图形管理器不能接管安装的根本原因。
 
 ### E. 验证改动是否生效
 
@@ -165,9 +193,11 @@ printf '{"id":"1","type":"get_commands"}\n' | pi --mode rpc
 2. `source=skill` 的每一条 `sourceInfo.baseDir` 都指向 `~/.agents`
 3. 预期的 extension 都在（本机：`handoff`、`webui`、`llama`）
 
-本机实测（2026-09-27）：33 个命令 = skill 27 + extension 3 + prompt 3，stderr 为空。
-注意 **lark 系一个都没有**（declared-not-installed，见 C），所以命令数取决于
-实际装了什么，不要拿固定数字当验收标准。
+本机实测（2026-09-28）：61 个命令 = skill 55（含 28 个 `lark-*`）+ extension 3 +
+prompt 3，stderr 为空。
+
+命令数取决于实际装了什么，**不要拿固定数字当验收标准**——用“skill 的 `baseDir`
+全部指向 `~/.agents`”和“stderr 为空”这两条。
 
 ### F. 回滚
 
@@ -293,9 +323,11 @@ packages](https://pi.dev/packages) 声明）目前**不在**本仓库里，而�
 
 ## 已知情况
 
-- **28 个 `lark-*` 只存在于 lock，不在磁盘**。README 早先版本的「首次引导 31 个
-  命令含 28 个 lark」和「`~/.pi/agent/skills/lark-*` 有 28 个软链」描述的是一个
-  **已安装**的状态，本机不是这个状态。见 C 的对账表。
+- **28 个 `lark-*` 已收编入库**（2026-09-28）：由 `skills` CLI 从飞书 well-known
+  端点装入 `~/.agents/skills/`，Claude Code 侧为软链。早先 README 描述的
+  「只存在于 lock、磁盘没有」已不成立。注：早先那句“31 个命令含 28 个 lark”与
+  “`~/.pi/agent/skills/lark-*` 有 28 个软链”描述的是**另一台机器/另一时刻**的
+  状态，本机按 B 的规则不建那套软链。
 - **`~/.pi/agent/skills/` 现在没有软链**。历史上那里有 5 条指向
   `~/.agents/skills/` 的软链（非 lark），已按 B 的规则 1 删除；实测技能数 27→27、
   无警告。
