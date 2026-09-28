@@ -122,15 +122,17 @@ C 的对账——lock 是「应装清单」，不等于磁盘现状。
 
 | 类别 | 数量 | 明细 |
 | --- | --- | --- |
-| lock 声明 | 48 | github 20 + well-known 28 |
-| 磁盘实装 | 55 | 已声明 45（28 个 `lark-*` + 17 个 github）+ 未登记 9 + 自有 1 |
+| lock 声明 | 54 | github 26 + well-known 28 |
+| 磁盘实装 | 55 | 已声明 51（28 个 `lark-*` + 23 个 github）+ 未登记 3 + 自有 1 |
 | 已声明未安装 | 3 | `ielts`、`session-handoff`、`session-history` |
-| 已安装未声明 | 9 | 见下 |
+| 已安装未声明 | 3 | 见下 |
 
-未登记的 9 个没有任何来源元数据（来自手工 clone 或更早的安装）：
-`book-translation`、`executing-plans`、`grilling`、`ielts-speaking`、
-`implementing-drag-drop`、`macos-design`、`self-explanatory-code`、
-`subagent-driven-development`、`ui-ux-pro-max`。
+未登记的 3 个没有任何来源元数据（手工 clone 或更早的安装）：
+`book-translation`、`implementing-drag-drop`、`self-explanatory-code`。
+（2026-09-28 已收编 6 个：`executing-plans`、`subagent-driven-development` 归
+`obra/superpowers`；`grilling` 归 `mattpocock/skills`；`ui-ux-pro-max` 归
+`nextlevelbuilder/ui-ux-pro-max-skill`；`ielts-speaking` 归
+`yanzhanlin/ielts-claude-skills`；`macos-design` 归 `ceorkm/macos-design-skill`。）
 
 未登记技能只有两条出路：**补来源**（重装或手工补 lock 条目）或**判为自有**
 （加白名单）。拖着不处理，它们既不可复现也不入库。
@@ -177,6 +179,25 @@ npx --yes skills@latest add "https://open.feishu.cn/lark-cli/skills/regular" \
 
 `well-known` 源只能由 `skills` CLI 安装——任何只认 git 的管理器都表达不了它们。
 这是「为什么不用 APM」的第一条，也是图形管理器不能接管安装的根本原因。
+
+#### 收编未登记技能（把磁盘上的“野”技能接回 lock）
+
+源用 `https://skills.sh/api/search?q=<name>` 解析（返回 `owner/repo/skill`）：
+
+```bash
+npx --yes skills@latest add <owner/repo> -s <skill> -g -a zed claude-code -y
+```
+
+**警告：安装是整目录替换，不是合并。** 本地独有的文件会消失。执行前先留快照：
+
+```bash
+tar czf /tmp/agents-before-absorb-$(date +%Y%m%d-%H%M%S).tar.gz -C ~ .agents
+```
+
+实测（2026-09-28 收编 6 个）：全部 6 个的 `SKILL.md` 都与磁盘旧版不同（旧版较旧，
+上游文件更多，如 `scripts/`、`catalog-summary.json`），其中 `ielts-speaking` 的
+`rubrics/` 与 `skill-references/` 两个本地独有目录**被删掉了**——要从快照里取回来
+才能合并。若本地有改动，先比对再决定装不装。
 
 ### E. 验证改动是否生效
 

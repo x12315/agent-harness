@@ -478,6 +478,61 @@
       "skillFolderHash": "8fe8e8b6ee9e5cbe53cb172a36f0dc31f9875847",
       "installedAt": "2026-06-04T14:42:18.069Z",
       "updatedAt": "2026-06-04T14:42:18.069Z"
+    },
+    "executing-plans": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/obra/superpowers.git",
+      "skillPath": "skills/executing-plans/SKILL.md",
+      "skillFolderHash": "899ffeab92be3de6cd9ed0078b32737b18b8c135",
+      "installedAt": "2026-09-28T01:48:28.220Z",
+      "updatedAt": "2026-09-28T01:48:28.220Z"
+    },
+    "subagent-driven-development": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/obra/superpowers.git",
+      "skillPath": "skills/subagent-driven-development/SKILL.md",
+      "skillFolderHash": "5d44ced88725298e847c62c67a726dcc29e20d00",
+      "installedAt": "2026-09-28T01:48:32.907Z",
+      "updatedAt": "2026-09-28T01:48:32.907Z"
+    },
+    "grilling": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/productivity/grilling/SKILL.md",
+      "skillFolderHash": "f0732035b8b1b60ae39454e4191caef32fa91903",
+      "pluginName": "mattpocock-skills",
+      "installedAt": "2026-09-28T01:48:38.385Z",
+      "updatedAt": "2026-09-28T01:48:38.385Z"
+    },
+    "ui-ux-pro-max": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+      "skillPath": ".claude/skills/ui-ux-pro-max/SKILL.md",
+      "skillFolderHash": "48a35ed8010c1667ad9ab22c9c307949ac4eeb6f",
+      "installedAt": "2026-09-28T01:49:00.670Z",
+      "updatedAt": "2026-09-28T01:49:00.670Z"
+    },
+    "ielts-speaking": {
+      "source": "yanzhanlin/ielts-claude-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/yanzhanlin/ielts-claude-skills.git",
+      "skillPath": "ielts-speaking/SKILL.md",
+      "skillFolderHash": "41e0277e8a3032d4437ee2be4f13a83b600662fd",
+      "installedAt": "2026-09-28T01:49:06.010Z",
+      "updatedAt": "2026-09-28T01:49:06.010Z"
+    },
+    "macos-design": {
+      "source": "ceorkm/macos-design-skill",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/ceorkm/macos-design-skill.git",
+      "skillPath": "SKILL.md",
+      "skillFolderHash": "8f528a2364f996cd42f02a10b1b27198a74ca2a3",
+      "installedAt": "2026-09-28T01:49:12.532Z",
+      "updatedAt": "2026-09-28T01:49:12.532Z"
     }
   }
 }
