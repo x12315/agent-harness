@@ -128,7 +128,18 @@ export function mergeSettings({ apply = false } = {}) {
     if (legacy) rmSync(LOCAL_PI_SETTINGS, { force: true });
     writeFileSync(LOCAL_PI_SETTINGS, serialized);
   }
-  return [{ target: LOCAL_PI_SETTINGS, action, detail: legacy ? "symlink -> real file (engineering + personalization)" : "engineering keys from adapters/pi/settings.json" }];
+  // A legacy symlink can only carry what its target holds. Once the shared file
+  // was trimmed to engineering keys, converting the symlink yields a file with
+  // no model/provider/theme at all - and that silently discarded one machine's
+  // real choices once. Say so instead of reporting a tidy "engineering +
+  // personalization".
+  const personalKeys = Object.keys(personal);
+  const detail = !legacy
+    ? "engineering keys from adapters/pi/settings.json"
+    : personalKeys.length
+      ? `symlink -> real file (engineering + ${personalKeys.length} personal setting(s))`
+      : "symlink -> real file; the shared file carries NO personalization, so this machine's model/provider/theme are not recovered by this conversion - set them again if they were not already lost";
+  return [{ target: LOCAL_PI_SETTINGS, action, detail }];
 }
 
 export function nextSteps() {
