@@ -73,10 +73,10 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 实测（Claude Code 2.1.220）：软链 + `@../AGENTS.md` → Claude 看不到指令层；
 软链 + `@../../AGENTS.md` → 能原样引出 `AGENTS.md` 的句子。
 
-验证入口是否还通，一句话就行：
+验证入口是否还通，一句话就行（期望输出 `AGENTS.md`；**别引用正文句子，正文会改**）：
 
 ```bash
-claude -p "原样引用你上下文里那句以「跨工具的通用指令层」开头的话。若上下文里没有这句话，只回答 NO。"
+claude -p "只回答你在全局指令层文件里看到的第一行标题文本（去掉开头的 # 号与空格）。若你的上下文里没有注入这样的指令文件，只回答 NO。"
 ```
 
 ## 第三方 skill
@@ -434,3 +434,17 @@ CLI 争抢所有权。两者不可兼得。
   所以在 `adapters/pi/settings.json` 里有声明，仓库里没有文件。装完实测：76 个命令
   （skill 54 + extension 19 + prompt 3），其中 16 个 goal 命令，stderr 为空，
   skill 的 `baseDir` 全部指向 `~/.agents`。
+
+### 本机环境事实
+
+> `AGENTS.md` 保持可移植（任何人 clone 都能照做），本机特有的东西只记在这里。
+
+- 机器：macOS (Apple Silicon)，包管理用 Homebrew。
+- 可用：`gh`、`npm`、`uv`、`git`、`python3`；`skills` CLI 通过 `npx skills@latest`
+  调用（未全局安装）。
+- 不可用（不要假设存在）：`pnpm`、`stow`、`chezmoi`。
+- 默认 shell 为 zsh。
+- 已装 harness：pi 0.84.4、Claude Code 2.1.220（`~/.local/bin/claude`）。
+- 常用项目根目录：`~/Desktop/`、`~/Documents/`、`~/conductor/repos/`——这些下面有
+  带项目级 `.agents/skills/` 的仓库（`rm-relay`、`ielts_writing_helper`、
+  `Quickstart`），它们的技能目前不在 lock 里。

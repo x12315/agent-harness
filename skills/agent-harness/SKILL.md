@@ -9,8 +9,12 @@ metadata:
 
 # agent-harness 维护
 
-本仓库 `~/.agents/` 是 agent loop 的唯一真相源。改动前读 `README.md`，那里有
-完整的分层说明与投影表。
+本仓库 `~/.agents/` 是 agent loop 的唯一真相源。改动前读：
+
+- `AGENTS.md` —— **规范层**：分层归属、硬规则、改动后必过的验证
+- `README.md` —— **流程层**：分层说明、投影表、特殊操作流程 A–G
+
+三者与本文件冲突时，以 `AGENTS.md` 为准。
 
 ## 核心约束
 
