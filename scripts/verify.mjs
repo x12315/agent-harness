@@ -10,7 +10,7 @@
  * has to stay usable on a machine that only runs one of them.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HOME, REPO, isSymlink, managedLinks, pins } from "./lib/repo.mjs";
@@ -22,12 +22,36 @@ const have = (cmd) => spawnSync("sh", ["-c", `command -v ${cmd}`], { encoding: "
 
 function checkPi() {
   if (!have("pi")) return { name: "pi discovery", status: "skip", detail: "pi not installed" };
+  const authPath = join(HOME, ".pi/agent/auth.json");
+  let credentialsEmpty = !existsSync(authPath);
+  if (!credentialsEmpty) {
+    try { credentialsEmpty = readFileSync(authPath, "utf8").trim().length <= 2; } catch { credentialsEmpty = true; }
+  }
+  if (credentialsEmpty) {
+    return {
+      name: "pi discovery",
+      status: "skip",
+      detail: `pi has no credentials in this HOME (${authPath}); sign in once, then re-run`,
+    };
+  }
   const r = spawnSync("pi", ["--mode", "rpc"], {
     input: '{"id":"1","type":"get_commands"}\n',
     encoding: "utf8",
     timeout: 180_000,
   });
-  if (r.error) return { name: "pi discovery", status: "fail", detail: String(r.error.message) };
+  if (r.error) {
+    // A fresh HOME makes pi install the packages declared in settings.json before
+    // it answers, which can outlast the probe. That is setup, not a repo defect.
+    const firstRunSetup = existsSync(join(HOME, ".pi/agent/npm/package.json"));
+    const timedOut = /ETIMEDOUT|timed? ?out/i.test(String(r.error.message));
+    return {
+      name: "pi discovery",
+      status: firstRunSetup && timedOut ? "skip" : "fail",
+      detail: firstRunSetup && timedOut
+        ? `pi was still doing first-run package setup in this HOME (npm/ present): ${r.error.message}; let it finish, then re-run`
+        : `${r.error.message} - on a fresh HOME pi first installs the packages declared in settings.json, which can take minutes`,
+    };
+  }
   const stderr = (r.stderr ?? "").trim();
   let cmds;
   for (const line of (r.stdout ?? "").split("\n")) {
@@ -58,6 +82,9 @@ function checkClaude() {
   const r = spawnSync("claude", ["-p", CLAUDE_PROBE], { encoding: "utf8", timeout: 300_000 });
   if (r.error) return { name: "claude entry", status: "fail", detail: String(r.error.message) };
   const out = (r.stdout ?? "").trim();
+  if (/not logged in|please run \/login|invalid api key|unauthorized/i.test(out)) {
+    return { name: "claude entry", status: "skip", detail: "claude is not signed in for this HOME; sign in once, then re-run" };
+  }
   const ok = out.includes("AGENTS.md");
   return {
     name: "claude entry",

@@ -56,13 +56,25 @@ export function run({ apply = false, all = false, json = false } = {}) {
   const cliVersion = pins().skillsCli;
   const coverageOk = p.unrestorable.length === 0 && p.missing.length === 0;
 
+  // Batched runs do fail transiently (upstream rate limits, flaky network), so a
+  // failed group is retried before it is reported. Observed in the clean-HOME
+  // drill: 4 of 14 groups failed once and every one of them succeeded on retry.
+  const attempts = Number(process.env.RESTORE_ATTEMPTS ?? 2);
   const results = [];
   if (apply) {
     for (const group of p.groups) {
       const argv = ["--yes", `skills@${cliVersion}`, "add", group.source, "-g", "-s", ...group.skills, "-a", "zed", "claude-code", "-y"];
-      const r = spawnSync("npx", argv, { encoding: "utf8", timeout: 900_000 });
-      results.push({ source: group.source, skills: group.skills.length, ok: r.status === 0, detail: r.status === 0 ? "" : (r.stderr ?? "").split("\n").filter(Boolean).slice(-1)[0]?.slice(0, 120) ?? `exit ${r.status}` });
-      if (!json) process.stdout.write(`${r.status === 0 ? "ok  " : "FAIL"}  ${group.source}  (${group.skills.length} skills)\n`);
+      let r;
+      let used = 0;
+      while (used < attempts) {
+        used += 1;
+        r = spawnSync("npx", argv, { encoding: "utf8", timeout: 900_000 });
+        if (r.status === 0) break;
+        if (used < attempts) spawnSync("sleep", ["3"]);
+      }
+      const detail = r.status === 0 ? "" : (r.stderr ?? "").split("\n").filter(Boolean).slice(-1)[0]?.slice(0, 140) ?? `exit ${r.status}`;
+      results.push({ source: group.source, skills: group.skills.length, ok: r.status === 0, attempts: used, detail });
+      if (!json) process.stdout.write(`${r.status === 0 ? "ok  " : "FAIL"}  ${group.source}  (${group.skills.length} skills)${used > 1 ? `  [retry ${used - 1}]` : ""}\n`);
     }
   }
 
