@@ -516,15 +516,6 @@
       "installedAt": "2026-09-28T01:49:00.670Z",
       "updatedAt": "2026-09-28T01:49:00.670Z"
     },
-    "ielts-speaking": {
-      "source": "yanzhanlin/ielts-claude-skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/yanzhanlin/ielts-claude-skills.git",
-      "skillPath": "ielts-speaking/SKILL.md",
-      "skillFolderHash": "41e0277e8a3032d4437ee2be4f13a83b600662fd",
-      "installedAt": "2026-09-28T01:49:06.010Z",
-      "updatedAt": "2026-09-28T01:49:06.010Z"
-    },
     "macos-design": {
       "source": "ceorkm/macos-design-skill",
       "sourceType": "github",
