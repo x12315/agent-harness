@@ -51,15 +51,33 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `adapters/pi/prompts/*.md`                | `~/.pi/agent/prompts/*.md`    | pi 的 prompt 模板发现位                |
 | `adapters/pi/agents/*.md`                 | `~/.pi/agent/agents/*.md`     | pi 的 subagent 定义发现位              |
 | `adapters/pi/settings.json`                | `~/.pi/agent/settings.json`   | pi 的 packages 声明要入库，产物（`npm/`、`git/`）不入库 |
+| `adapters/claude-code/CLAUDE.md`           | `~/.claude/CLAUDE.md`         | Claude Code 只读 `CLAUDE.md`，入口文件导入 AGENTS.md |
 | `skills/<name>/`                          | `~/.claude/skills/<name>`     | 该 harness 不读 `.agents/`，由 `skills` CLI 建软链 |
 | `skills/`                                 | —（无需投影）                 | pi 原生扫描 `~/.agents/skills/`        |
 
 **投影铁律：投影只能指向本仓库。** 指向上游安装目录（如 pi 的 `examples/`）的
 链接会在升级时断掉，或静默换成新版本内容——那等于把真相源搬到仓库之外。
 
-若某个 harness 有自家的指令文件名（例：Claude Code 读 `CLAUDE.md`，且不在
-agents.md 的支持列表里），在 `adapters/<name>/` 下放一个指向 `../../AGENTS.md`
-的软链，再把它投影到该 harness 的位置。目前只装了 pi，所以还没有这类 adapter。
+若某个 harness 有自家的指令文件名，在 `adapters/<name>/` 下放一个**兼容入口
+文件**，再把它投影到该 harness 的位置。目前两个已装 harness 的入口：
+
+| harness | 入口 | 投影 |
+| --- | --- | --- |
+| pi | 无入口文件，直接投影 `AGENTS.md` | `~/.pi/agent/AGENTS.md` |
+| Claude Code | `adapters/claude-code/CLAUDE.md`（内容 `@../../AGENTS.md`） | `~/.claude/CLAUDE.md` |
+
+**陷阱：`@` 导入按文件的真实路径解析，不是按投影路径。** 所以入口文件被软链出去
+之后，里面的相对路径必须按**仓库内位置**写——`adapters/claude-code/CLAUDE.md`
+里要写 `@../../AGENTS.md`。按投影位置写成 `@../AGENTS.md` 会直接失效。
+
+实测（Claude Code 2.1.220）：软链 + `@../AGENTS.md` → Claude 看不到指令层；
+软链 + `@../../AGENTS.md` → 能原样引出 `AGENTS.md` 的句子。
+
+验证入口是否还通，一句话就行：
+
+```bash
+claude -p "原样引用你上下文里那句以「跨工具的通用指令层」开头的话。若上下文里没有这句话，只回答 NO。"
+```
 
 ## 第三方 skill
 
