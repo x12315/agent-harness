@@ -16,3 +16,6 @@
 # Python 产物（book-translation 的脚本会生成）
 __pycache__/
 *.pyc
+
+# 依赖产物（适配器若引第三方 npm 依赖时）
+node_modules/
