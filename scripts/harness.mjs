@@ -10,6 +10,11 @@
  *   drift       recorded well-known digests vs the upstream index (network)
  *   verify      pi discovery, claude entry, projection and repo hygiene
  *   all         bootstrap -> reconcile -> verify   (default)
+ *   install     the official one-shot for a new machine:
+ *               bootstrap --apply -> restore --apply -> reconcile -> verify
+ *
+ * `install` is the method to document and to run on a fresh machine; `all` is
+ * the check-only entry you run after any edit.
  *
  * Everything is read-only unless --apply is given, and every step is
  * idempotent, so re-running is always safe.
@@ -28,7 +33,20 @@ const runners = { bootstrap, restore, reconcile, drift, verify };
 const heading = (text) => process.stdout.write(`\n== ${text}\n`);
 
 let code = 0;
-if (command === "all") {
+if (command === "install") {
+  // The official path for a fresh machine. Applying is the point of the
+  // command, so it forces --apply rather than asking for it twice.
+  heading("bootstrap (applying)");
+  if (bootstrap({ ...options, apply: true }) !== 0) code = 1;
+  heading("restore (applying)");
+  if (restore({ ...options, apply: true }) !== 0) code = 1;
+  if (!options.json) {
+    heading("reconcile");
+    if (reconcile(options) !== 0) code = 1;
+    heading("verify");
+    if (verify(options) !== 0) code = 1;
+  }
+} else if (command === "all") {
   heading(`bootstrap${options.apply ? " (applying)" : " (dry run)"}`);
   if (bootstrap(options) !== 0) {
     code = 1;
@@ -43,7 +61,7 @@ if (command === "all") {
 } else if (Object.hasOwn(runners, command)) {
   code = (await runners[command](options)) ?? 0;
 } else {
-  process.stderr.write(`unknown command: ${command}\nusage: harness.mjs <bootstrap|restore|reconcile|drift|verify|all> [--apply] [--all] [--json]\n`);
+  process.stderr.write(`unknown command: ${command}\nusage: harness.mjs <bootstrap|restore|reconcile|drift|verify|all|install> [--apply] [--all] [--json]\n`);
   code = 2;
 }
 process.exit(code);

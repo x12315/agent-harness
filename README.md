@@ -81,14 +81,51 @@ claude -p "只回答你在全局指令层文件里看到的第一行标题文本
 
 ## 第三方 skill
 
-由 `skills` CLI 从远端 registry 安装，锁定在 `.skill-lock.json`：
+**管理完全借助第三方的 `skills` CLI**（钉在 1.7.0，见 `pinned-versions.json`）。
+本仓库不自建包格式、不自建 registry、不 vendor 内容；只把来源与 digest 记进
+`.skill-lock.json`，产物等同 `node_modules`，不入库。
+
+官方安装渠道就是本仓库的 `install`：它读 lock、按来源分组、调 `skills` CLI 复原。
 
 ```bash
-npx skills add <source>        # 安装，自动更新 lockfile
+node scripts/harness.mjs install     # 新机器：投影 + 复原 + 对账 + 验收
+node scripts/harness.mjs restore     # 只复原（默认只打印命令）
+npx skills add <source>              # 手动加一个，会更新 lock
 npx skills list
 ```
 
-它们等同 `node_modules`，不入库。在新机器上装完 CLI 后按 lockfile 复现即可。
+`restore.mjs` 存在的原因：CLI **没有全局的「按 lock 安装」命令**（它的
+`experimental_install` 只读项目级 `skills-lock.json`），所以由脚本把 lock 按来源
+分组、每组发一条 `skills add`。
+
+### 当前来源（14 组）
+
+| 来源 | 技能 |
+| --- | --- |
+| 飞书 well-known 端点 | `lark-*`（28 个；`sourceType: well-known`，无 `skillFolderHash`） |
+| `obra/superpowers` | brainstorming, executing-plans, finishing-a-development-branch, subagent-driven-development, using-git-worktrees, using-superpowers, writing-plans |
+| `github/awesome-copilot` | documentation-writer, git-commit, make-repo-contribution |
+| `stablyai/orca` | computer-use, orca-cli, orchestration |
+| `mattpocock/skills` | grilling, writing-for-agents |
+| `vercel-labs/skills` | find-skills |
+| `vercel-labs/agent-browser` | agent-browser |
+| `anthropics/skills` | frontend-design |
+| `softaworks/agent-toolkit` | session-handoff |
+| `nextlevelbuilder/ui-ux-pro-max-skill` | ui-ux-pro-max |
+| `op7418/Humanizer-zh` | humanizer-zh |
+| `ceorkm/macos-design-skill` | macos-design |
+| `ancoleman/ai-design-components` | implementing-drag-drop |
+| `DietrichGebert/ponytail` | ponytail |
+
+装到哪里由 `restore.mjs` 的 `-a zed claude-code` 决定：全局落 `~/.agents/skills/`
+（pi 原生读这里），再给不扫 `.agents/` 的 harness 建软链。**没装的 harness 会被
+CLI 自动跳过**（实测 zed 未装，没有创建任何目录）。
+
+### 不要建到 pi 私有路径
+
+`~/.pi/agent/skills/` 不应该有指向 `~/.agents/skills/` 的软链。pi 原生扫描中立
+路径，两边并存会让 `verify` 把这些技能判为「来自仓库之外」而失败。历史上那里
+曾有一套 28 个 lark 软链（早于本仓库存在），已删除。
 
 ## 新增自有 skill
 
@@ -117,13 +154,27 @@ $EDITOR ~/.agents/skills/<name>/SKILL.md
 ```bash
 git clone <this-repo> ~/.agents
 cd ~/.agents
-node scripts/harness.mjs bootstrap --apply   # 14 条投影，不用手打 ln
-node scripts/restore.mjs --apply             # 按 lock 复原第三方技能，14 组
-node scripts/harness.mjs all                 # 对账 + 验收，退出码即结论
+node scripts/harness.mjs install   # 官方一条命令：投影 + 复原 + 对账 + 验收
 ```
 
-`bootstrap` 只写软链；`restore` 默认只打印命令、`--apply` 才装，并且默认跳过已在盘上
-的技能，所以重复执行是安全的。**`skills/` 不需要任何投影**（pi 原生扫描
+`install` 是**官方安装入口**，依次做四件事，退出码即结论：
+
+1. `bootstrap --apply` —— 按 `managedLinks()` 写 14 条投影，不用手打 `ln`
+2. `restore --apply` —— 按 lock 复原第三方技能（本机 52 个 → 14 组）
+3. `reconcile` —— 声明 vs 实装，差异必须已登记
+4. `verify` —— pi 发现、Claude 入口、投影、仓库卫生
+
+只查不改、或只跑其中一步，也随时可以：
+
+```bash
+node scripts/harness.mjs all         # 只对账 + 验收，不写任何东西
+node scripts/restore.mjs --apply     # 只复原第三方技能
+```
+
+第三方技能的管理**完全借助 `skills` CLI**（钉在 1.7.0），本仓库不自建格式、
+不自建 registry。`restore` 存在的原因是：`skills` CLI **没有全局的「按 lock 安装」
+命令**——它的 `experimental_install` 只读项目级 `skills-lock.json`。所以这项工作
+由本仓库的脚本补上。**`skills/` 不需要任何投影**（pi 原生扫描
 `~/.agents/skills/`）。
 
 注意 `restore` 存在的原因是：`skills` CLI **没有全局的「按 lock 安装」命令**——它的
@@ -264,15 +315,14 @@ printf '{"id":"1","type":"get_commands"}\n' | pi --mode rpc
 
 1. stderr 为空——有重名或格式错误会在这里报警告
 2. `source=skill` 的每一条 `sourceInfo.baseDir` 都指向 `~/.agents`
-3. 预期的 extension 都在（本机：`handoff`、`bookmark`、`llama`）
+3. 预期的 extension 都在（本机：`handoff`、`bookmark`、`webui`、`goal` ×16、`llama`）
 
-本机实测（2026-09-28）：37 个命令 = skill 31 + extension 6，stderr 为空。
-`bookmark.ts` 一个文件注册 4 条命令（`bookmark` / `bookmarks` / `goto` /
-`unbookmark`）。
+本机实测（2026-09-28，收编 24 个 github 技能后）：81 个命令 =
+skill 55 + extension 23 + prompt 3，stderr 为空，**55 个 skill 的 `baseDir`
+全部指向 `~/.agents`**。
 
-注：该次实测时仓库里 15 条投影尚未铺完（3 个 prompt 模板、4 个 subagent 定义、
-Claude 入口都缺），跑 `node scripts/harness.mjs all --apply` 后 prompt 类命令
-才会出现。
+注：`extension 23` 里有 16 条来自 pi 包 `npm:pi-goal-x`、1 条来自
+`npm:pi-web-ui`——那些是 pi 安装包的产物，在 `~/.pi/agent/npm/` 下，不在仓库里。
 
 命令数取决于实际装了什么，**不要拿固定数字当验收标准**——用“skill 的 `baseDir`
 全部指向 `~/.agents`”和“stderr 为空”这两条。
@@ -310,18 +360,21 @@ git push -u origin main
 `git reset --soft` 是关键：它把远端 HEAD 变成父节点，避免产生一条无共同祖先的
 历史（直接 push 会被拒或被迫 `--force`）。
 
-**注意**：`git push` 前确认提交身份是对的。本机全局身份是
-`montana <2398925789@qq.com>`，仓库里没有 repo-local 覆盖。
+**注意**：`git push` 前确认提交身份是对的。本机**没有**全局 `user.name` /
+`user.email`，本仓库带一条 repo-local 覆盖（`montana <2398925789@qq.com>`）。
 
 ## 脚本（scripts/）
 
 所有检查都在这里：纯 Node 内置模块，零第三方依赖，默认只读，重复执行安全。
 
 ```bash
-node scripts/harness.mjs all            # 新机器/改动后：引导(dry run) → 对账 → 验收
-node scripts/harness.mjs all --apply    # 真的把投影写下去
-node scripts/harness.mjs bootstrap|reconcile|drift|verify [--json]
+node scripts/harness.mjs install        # 新机器一条命令：投影 + 复原 + 对账 + 验收
+node scripts/harness.mjs all            # 改完只查：对账 + 验收（不写任何东西）
+node scripts/harness.mjs all --apply    # 只把投影写下去
+node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify [--json]
 ```
+
+`install` 是唯一需要记住的入口；其余都是它的分解步骤。查清一件事用单项命令。
 
 | 脚本 | 做什么 | 网络 |
 | --- | --- | --- |
@@ -563,9 +616,10 @@ git 仓库根）。策略：
   「只存在于 lock、磁盘没有」已不成立。注：早先那句“31 个命令含 28 个 lark”与
   “`~/.pi/agent/skills/lark-*` 有 28 个软链”描述的是**另一台机器/另一时刻**的
   状态，本机按 B 的规则不建那套软链。
-- **`~/.pi/agent/skills/` 现在没有软链**。历史上那里有 5 条指向
-  `~/.agents/skills/` 的软链（非 lark），已按 B 的规则 1 删除；实测技能数 27→27、
-  无警告。
+- **`~/.pi/agent/skills/` 现在没有软链，且不应有**。历史上那里有 28 条指向
+  `~/.agents/skills/lark-*` 的软链（早于本仓库存在），已删除；pi 原生扫描中立
+  路径，并存会让 `verify` 把它们判为「来自仓库之外」。该目录本身保留（pi 的
+  全局技能位，将来放厂商专用技能）。
 - **`skills/.openclaude/` 已隔离**（2026-09-28）：那是 22 个目录的无主嵌套副本，
   已移到 `/tmp/agents-quarantine/`，详见「决策记录」。`skills/` 下现在只有 `.DS_Store`
   这类 OS 噪声（已 gitignore）。
@@ -574,11 +628,11 @@ git 仓库根）。策略：
 - `~/.pi/agent/skills/` 是个空目录，保留（pi 原生全局技能位，将来放厂商专用技能）。
 - **`~/.pi/agent/settings.json` 是软链**（2026-09-28）：投影自
   `adapters/pi/settings.json`，为的是把 pi 包的声明入库。写穿已实测（见 B 的规则 4）。
-- **装了 `npm:pi-goal-x`**（2026-09-28）：pi 的 `/goal` 型长任务循环包，由
-  `pi install` 装入 `~/.pi/agent/npm/`。它属于「声明入库、产物不入库」里的产物，
-  所以在 `adapters/pi/settings.json` 里有声明，仓库里没有文件。装完实测：76 个命令
-  （skill 54 + extension 19 + prompt 3），其中 16 个 goal 命令，stderr 为空，
-  skill 的 `baseDir` 全部指向 `~/.agents`。
+- **装了 `npm:pi-goal-x` 与 `npm:pi-web-ui`**（2026-09-28）：由 `pi install` 装入
+  `~/.pi/agent/npm/`。它们属于「声明入库、产物不入库」里的产物，所以在
+  `adapters/pi/settings.json` 里有声明，仓库里没有文件。收编 24 个 github 技能后
+  实测：81 个命令（skill 55 + extension 23 + prompt 3），stderr 为空，skill 的
+  `baseDir` 全部指向 `~/.agents`。
 
 ### 本机环境事实
 

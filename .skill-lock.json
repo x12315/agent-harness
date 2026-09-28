@@ -22,27 +22,27 @@
       "sourceType": "github",
       "sourceUrl": "https://github.com/vercel-labs/agent-browser.git",
       "skillPath": "skills/agent-browser/SKILL.md",
-      "skillFolderHash": "9b31e495b887e4ca123960415eca69fc7e1bba28",
+      "skillFolderHash": "82def67855a0d2aad7794207951820fa5422fdb0",
       "installedAt": "2026-07-04T14:06:15.202Z",
-      "updatedAt": "2026-07-04T14:06:15.202Z"
+      "updatedAt": "2026-09-28T07:18:16.794Z"
     },
     "brainstorming": {
       "source": "obra/superpowers",
       "sourceType": "github",
       "sourceUrl": "https://github.com/obra/superpowers.git",
       "skillPath": "skills/brainstorming/SKILL.md",
-      "skillFolderHash": "f260c775073816860fef8a37c032ac77e2ff5821",
+      "skillFolderHash": "03d4c6657cd20ba0fce9d270fc688150bd191c3b",
       "installedAt": "2026-06-04T14:42:11.218Z",
-      "updatedAt": "2026-06-04T14:42:11.218Z"
+      "updatedAt": "2026-09-28T07:17:34.398Z"
     },
     "computer-use": {
       "source": "stablyai/orca",
       "sourceType": "github",
       "sourceUrl": "https://github.com/stablyai/orca.git",
       "skillPath": "skills/computer-use/SKILL.md",
-      "skillFolderHash": "2072384f53670cb61d93f4f6264ad2d8f6b5239c",
+      "skillFolderHash": "b59f27370a41225c22127e91da0c91cd2519f217",
       "installedAt": "2026-07-28T15:30:59.347Z",
-      "updatedAt": "2026-07-28T15:30:59.347Z"
+      "updatedAt": "2026-09-28T07:18:12.277Z"
     },
     "documentation-writer": {
       "source": "github/awesome-copilot",
@@ -51,35 +51,35 @@
       "skillPath": "skills/documentation-writer/SKILL.md",
       "skillFolderHash": "016d8040a3f91c8360b1003e74fbf29f34c283f5",
       "installedAt": "2026-08-25T08:07:55.649Z",
-      "updatedAt": "2026-08-25T08:07:55.649Z"
+      "updatedAt": "2026-09-28T07:17:16.834Z"
     },
     "find-skills": {
       "source": "vercel-labs/skills",
       "sourceType": "github",
       "sourceUrl": "https://github.com/vercel-labs/skills.git",
       "skillPath": "skills/find-skills/SKILL.md",
-      "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
+      "skillFolderHash": "76a98a285cb0434f3d39e1a873823556330e398b",
       "installedAt": "2026-06-03T10:39:10.456Z",
-      "updatedAt": "2026-06-03T11:04:09.067Z"
+      "updatedAt": "2026-09-28T07:18:20.739Z"
     },
     "finishing-a-development-branch": {
       "source": "obra/superpowers",
       "sourceType": "github",
       "sourceUrl": "https://github.com/obra/superpowers.git",
       "skillPath": "skills/finishing-a-development-branch/SKILL.md",
-      "skillFolderHash": "97f521c5001a8b979aa297a69c4257ce8b6a0939",
+      "skillFolderHash": "3b1205aa5038c71946077dd63b9e71b447729e70",
       "installedAt": "2026-07-04T14:06:10.639Z",
-      "updatedAt": "2026-07-04T14:06:10.639Z"
+      "updatedAt": "2026-09-28T07:17:34.400Z"
     },
     "frontend-design": {
       "source": "anthropics/skills",
       "sourceType": "github",
       "sourceUrl": "https://github.com/anthropics/skills.git",
       "skillPath": "skills/frontend-design/SKILL.md",
-      "skillFolderHash": "928950704df8a8b885c03de5da626331e6f29cf8",
+      "skillFolderHash": "d79e2a5bb4df4a386c2adcdd9ab8709bba28c3f6",
       "pluginName": "example-skills",
       "installedAt": "2026-06-04T14:42:07.758Z",
-      "updatedAt": "2026-06-04T14:42:07.758Z"
+      "updatedAt": "2026-09-28T07:16:51.546Z"
     },
     "git-commit": {
       "source": "github/awesome-copilot",
@@ -88,16 +88,16 @@
       "skillPath": "skills/git-commit/SKILL.md",
       "skillFolderHash": "883a6a7466f55a9cd9f22cf1cce2d9333fc9b998",
       "installedAt": "2026-08-25T08:37:59.029Z",
-      "updatedAt": "2026-08-25T08:37:59.029Z"
+      "updatedAt": "2026-09-28T07:17:16.837Z"
     },
     "humanizer-zh": {
       "source": "op7418/Humanizer-zh",
       "sourceType": "github",
       "sourceUrl": "https://github.com/op7418/Humanizer-zh.git",
       "skillPath": "SKILL.md",
-      "skillFolderHash": "91f3d394db8419c20d67ebe22a96cf8fee0a404b",
+      "skillFolderHash": "f4518a8eab97b8bfebc66a89d34320a89bef6930",
       "installedAt": "2026-06-19T10:33:37.382Z",
-      "updatedAt": "2026-06-19T10:33:37.382Z"
+      "updatedAt": "2026-09-28T07:17:39.927Z"
     },
     "lark-approval": {
       "source": "open.feishu.cn",
@@ -386,34 +386,34 @@
       "skillPath": "skills/make-repo-contribution/SKILL.md",
       "skillFolderHash": "00db961c2dfb0c27be715a37bf1ddc5ad1bc7185",
       "installedAt": "2026-08-25T08:37:59.036Z",
-      "updatedAt": "2026-08-25T08:37:59.036Z"
+      "updatedAt": "2026-09-28T07:17:16.837Z"
     },
     "orca-cli": {
       "source": "stablyai/orca",
       "sourceType": "github",
       "sourceUrl": "https://github.com/stablyai/orca.git",
       "skillPath": "skills/orca-cli/SKILL.md",
-      "skillFolderHash": "ee3a35c76f875ea6ebaf68947af13ba6346b13f2",
+      "skillFolderHash": "572f7952ac451a30a9c2451b472a639b125ee584",
       "installedAt": "2026-07-28T15:30:59.349Z",
-      "updatedAt": "2026-08-30T09:48:53.555Z"
+      "updatedAt": "2026-09-28T07:18:12.281Z"
     },
     "orchestration": {
       "source": "stablyai/orca",
       "sourceType": "github",
       "sourceUrl": "https://github.com/stablyai/orca.git",
       "skillPath": "skills/orchestration/SKILL.md",
-      "skillFolderHash": "9aa26fde93c0592e5983cdca1ccd33b402802255",
+      "skillFolderHash": "b0cd1d58b0c317cf7c3726fef7e6b1197c405246",
       "installedAt": "2026-07-28T15:30:59.350Z",
-      "updatedAt": "2026-07-28T15:30:59.350Z"
+      "updatedAt": "2026-09-28T07:18:12.281Z"
     },
     "ponytail": {
       "source": "DietrichGebert/ponytail",
       "sourceType": "github",
       "sourceUrl": "https://github.com/DietrichGebert/ponytail.git",
       "skillPath": "skills/ponytail/SKILL.md",
-      "skillFolderHash": "1a0986741a7f119c0fee6c3769c382029c238ac8",
+      "skillFolderHash": "cb6e53477eaf04e6daeca22feacb85f9ce20d40c",
       "installedAt": "2026-06-22T17:56:08.193Z",
-      "updatedAt": "2026-06-22T17:56:08.193Z"
+      "updatedAt": "2026-09-28T07:17:00.160Z"
     },
     "session-handoff": {
       "source": "softaworks/agent-toolkit",
@@ -422,25 +422,25 @@
       "skillPath": "skills/session-handoff/SKILL.md",
       "skillFolderHash": "9038976da9e22fa34168feb813ef18082fe005b1",
       "installedAt": "2026-07-04T14:06:20.803Z",
-      "updatedAt": "2026-09-28T02:39:49.261Z"
+      "updatedAt": "2026-09-28T07:17:44.514Z"
     },
     "using-git-worktrees": {
       "source": "obra/superpowers",
       "sourceType": "github",
       "sourceUrl": "https://github.com/obra/superpowers.git",
       "skillPath": "skills/using-git-worktrees/SKILL.md",
-      "skillFolderHash": "069a24665c6ce34ca78da57727c84e3c05e65c76",
+      "skillFolderHash": "d2b8357b922667a091bfe967840abf5ae84ce99c",
       "installedAt": "2026-07-04T14:06:06.447Z",
-      "updatedAt": "2026-07-04T14:06:06.447Z"
+      "updatedAt": "2026-09-28T07:17:34.401Z"
     },
     "using-superpowers": {
       "source": "obra/superpowers",
       "sourceType": "github",
       "sourceUrl": "https://github.com/obra/superpowers.git",
       "skillPath": "skills/using-superpowers/SKILL.md",
-      "skillFolderHash": "225dd70596c396940ff158335a954a64d93ece40",
+      "skillFolderHash": "4c777432715fe58984d212a36aedc6a18472e512",
       "installedAt": "2026-06-04T14:42:14.641Z",
-      "updatedAt": "2026-06-04T14:42:14.641Z"
+      "updatedAt": "2026-09-28T07:17:34.402Z"
     },
     "writing-for-agents": {
       "source": "mattpocock/skills",
@@ -450,16 +450,16 @@
       "skillFolderHash": "ad2925850efb8973a72d2e666f7a975f9a2d4a9b",
       "pluginName": "mattpocock-skills",
       "installedAt": "2026-08-25T08:10:04.001Z",
-      "updatedAt": "2026-08-25T08:10:04.001Z"
+      "updatedAt": "2026-09-28T07:17:21.829Z"
     },
     "writing-plans": {
       "source": "obra/superpowers",
       "sourceType": "github",
       "sourceUrl": "https://github.com/obra/superpowers.git",
       "skillPath": "skills/writing-plans/SKILL.md",
-      "skillFolderHash": "8fe8e8b6ee9e5cbe53cb172a36f0dc31f9875847",
+      "skillFolderHash": "cc97fa00eb2ccd4f283e34eb2ba06a48e1e679f7",
       "installedAt": "2026-06-04T14:42:18.069Z",
-      "updatedAt": "2026-06-04T14:42:18.069Z"
+      "updatedAt": "2026-09-28T07:17:34.402Z"
     },
     "executing-plans": {
       "source": "obra/superpowers",
@@ -468,7 +468,7 @@
       "skillPath": "skills/executing-plans/SKILL.md",
       "skillFolderHash": "899ffeab92be3de6cd9ed0078b32737b18b8c135",
       "installedAt": "2026-09-28T01:48:28.220Z",
-      "updatedAt": "2026-09-28T01:48:28.220Z"
+      "updatedAt": "2026-09-28T07:17:34.400Z"
     },
     "subagent-driven-development": {
       "source": "obra/superpowers",
@@ -477,7 +477,7 @@
       "skillPath": "skills/subagent-driven-development/SKILL.md",
       "skillFolderHash": "5d44ced88725298e847c62c67a726dcc29e20d00",
       "installedAt": "2026-09-28T01:48:32.907Z",
-      "updatedAt": "2026-09-28T01:48:32.907Z"
+      "updatedAt": "2026-09-28T07:17:34.401Z"
     },
     "grilling": {
       "source": "mattpocock/skills",
@@ -487,7 +487,7 @@
       "skillFolderHash": "f0732035b8b1b60ae39454e4191caef32fa91903",
       "pluginName": "mattpocock-skills",
       "installedAt": "2026-09-28T01:48:38.385Z",
-      "updatedAt": "2026-09-28T01:48:38.385Z"
+      "updatedAt": "2026-09-28T07:17:21.827Z"
     },
     "ui-ux-pro-max": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
@@ -496,7 +496,7 @@
       "skillPath": ".claude/skills/ui-ux-pro-max/SKILL.md",
       "skillFolderHash": "48a35ed8010c1667ad9ab22c9c307949ac4eeb6f",
       "installedAt": "2026-09-28T01:49:00.670Z",
-      "updatedAt": "2026-09-28T01:49:00.670Z"
+      "updatedAt": "2026-09-28T07:17:27.940Z"
     },
     "macos-design": {
       "source": "ceorkm/macos-design-skill",
@@ -505,7 +505,7 @@
       "skillPath": "SKILL.md",
       "skillFolderHash": "8f528a2364f996cd42f02a10b1b27198a74ca2a3",
       "installedAt": "2026-09-28T01:49:12.532Z",
-      "updatedAt": "2026-09-28T01:49:12.532Z"
+      "updatedAt": "2026-09-28T07:16:55.464Z"
     },
     "implementing-drag-drop": {
       "source": "ancoleman/ai-design-components",
@@ -515,7 +515,7 @@
       "skillFolderHash": "e7a92f735c686afa2959df959f91403ee41bc952",
       "pluginName": "ui-interaction-skills",
       "installedAt": "2026-09-28T01:52:50.842Z",
-      "updatedAt": "2026-09-28T01:52:50.842Z"
+      "updatedAt": "2026-09-28T07:16:47.302Z"
     }
   }
 }
