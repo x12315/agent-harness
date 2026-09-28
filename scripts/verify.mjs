@@ -3,8 +3,9 @@
  * Post-change checks. Read-only.
  *   1. pi discovers every skill from this repo and reports no warnings
  *   2. the Codex entry resolves into this repo
- *   3. every managed projection is a symlink pointing into this repo
- *   4. repo hygiene: no committed symlinks, node_modules or secrets
+ *   3. the vendored pi adapter still imports symbols pi actually exports
+ *   4. every managed projection is a symlink pointing into this repo
+ *   5. repo hygiene: no committed symlinks, node_modules or secrets
  *
  * A check is skipped, not failed, when its harness is not installed - the repo
  * has to stay usable on a machine that only runs one of them.
@@ -13,7 +14,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { HOME, REPO, isInsideRepo, isSymlink, managedLinks, pins } from "./lib/repo.mjs";
+import { checkAdapterContract } from "./lib/adapter-contract.mjs";
+import { HOME, REPO, isInsideRepo, isSymlink, managedLinks } from "./lib/repo.mjs";
 
 /**
  * Compare paths through realpath: a repo under a symlinked prefix (macOS /tmp ->
@@ -188,23 +190,25 @@ function checkHygiene() {
   };
 }
 
-function versionNotes() {
-  const p = pins();
-  const notes = [];
-  const piVersion = have("pi") ? spawnSync("pi", ["--version"], { encoding: "utf8" }).stdout.trim() : "";
-  if (piVersion && p.piVerifiedWith && piVersion !== p.piVerifiedWith) {
-    notes.push(`pi ${piVersion} != verified-with ${p.piVerifiedWith} (extensions depend on its exports; re-run the checks)`);
+/**
+ * Report the installed harness versions instead of pinning them. A pin here
+ * would be a hand-maintained cache of one command's output - it goes stale
+ * (it did: 0.157.1 vs 0.154.0 on disk) and gates nothing. The coupling that
+ * the pi pin was meant to catch is checked by the adapter-contract probe.
+ */
+function observedVersions() {
+  const versions = [];
+  if (have("pi")) versions.push(`pi ${spawnSync("pi", ["--version"], { encoding: "utf8" }).stdout.trim()}`);
+  if (have("codex")) {
+    const raw = spawnSync("codex", ["--version"], { encoding: "utf8" }).stdout.trim();
+    versions.push(raw.startsWith("codex-cli") ? raw : `codex ${raw}`);
   }
-  const codexVersion = have("codex") ? spawnSync("codex", ["--version"], { encoding: "utf8" }).stdout.trim().replace(/^codex-cli\s+/, "") : "";
-  if (codexVersion && p.codexVerifiedWith && codexVersion !== p.codexVerifiedWith) {
-    notes.push(`codex ${codexVersion} != verified-with ${p.codexVerifiedWith}`);
-  }
-  return notes;
+  return versions.length ? [`${versions.join(", ")} (observed live, not pinned)`] : [];
 }
 
 export function run({ json = false } = {}) {
-  const checks = [checkPi(), checkCodex(), checkProjections(), checkHygiene()];
-  const notes = versionNotes();
+  const checks = [checkPi(), checkCodex(), checkAdapterContract(), checkProjections(), checkHygiene()];
+  const notes = observedVersions();
   const ok = checks.every((c) => c.status !== "fail");
   if (json) {
     console.log(JSON.stringify({ ok, checks, notes }, null, 2));

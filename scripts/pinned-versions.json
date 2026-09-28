@@ -1,6 +1,4 @@
 {
-  "note": "Scripts pin the skills CLI to skillsCli. pi / Codex entries are the versions this repo was verified against - upgrades are legitimate, verify.mjs only reports a mismatch.",
-  "skillsCli": "1.7.0",
-  "piVerifiedWith": "0.84.4",
-  "codexVerifiedWith": "0.157.1"
+  "note": "skillsCli is the CLI the scripts actually execute and were written against; changing it means re-testing the workarounds in restore.mjs. Installed harness versions are deliberately absent: a version is a fact to observe, not a claim to cache (verify.mjs reports them live), and the pi adapter's coupling to pi's internal exports is gated by the `adapter contract` probe instead of by a version number.",
+  "skillsCli": "1.7.0"
 }

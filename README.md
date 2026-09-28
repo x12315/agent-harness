@@ -385,15 +385,18 @@ node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify|secrets [--jso
 | `restore.mjs` | 按来源把 lock 分组，复原第三方技能（本机 52 个 → 14 组）。**默认只打印命令**，`--apply` 才装；默认跳过已在盘上的，`--all` 强制全量 | ✅ |
 | `reconcile.mjs` | 声明 vs 实装，按 `sourceType` 分类。差异必须逐条登记在 `scripts/expected-gaps.json`，否则失败 | ❌ |
 | `drift.mjs` | 把 lock 的 `wellKnownDigest` 与上游 `.well-known/agent-skills/index.json` 逐个比对；上游多出来的技能只报告、不失败 | ✅ |
-| `verify.mjs` | 四项：pi 发现、Codex 入口、投影都是指向仓库的软链、仓库卫生 | ✅ |
+| `verify.mjs` | 五项：pi 发现、Codex 入口、pi 适配层的符号契约、投影都是指向仓库的软链、仓库卫生 | ✅ |
 | `secret-scan.mjs` | 扫凭据：默认扫全部受控文件，`--staged` 扫暂存差异（pre-commit 用），`--history` 扫全部提交。命中即失败，且**只打印掩码**，不会二次泄露 | ❌ |
 
 退出码：`0` 通过 / `1` 有未登记的差异或检查失败 / `2` 用法或仓库状态错误。
 `verify` 里 harness 没装的检查项**跳过而不失败**（仓库在只装一个 harness 的机器上也要能用）。
 
-**版本钉住**在 `scripts/pinned-versions.json`：`skillsCli` 是脚本与文档统一使用的版本；
-`piVerifiedWith` / `codexVerifiedWith` 是实测过的版本，不匹配时 `verify` 只提示
-——升级是合法操作，但 pi 的扩展依赖它导出的符号。
+**版本钉住**在 `scripts/pinned-versions.json`，但只钉一种：`skillsCli` 是脚本真正执行、
+并对齐过其怪癖的 CLI——改它就得重测 `restore.mjs` 里的 workaround。**宿主上装了什么版本
+不钉**：版本是要现场观测的事实，不是该手抄的缓存，所以 `verify` 每次把实测值打在末尾
+（`note pi … , codex-cli …`）。pi 适配层对 pi 内部导出符号的依赖由 `adapter contract`
+探针来守：它读**已安装**包的声明文件，逐个核对适配层 import 的符号还在不在，改名即失败
+并点出符号名。
 
 **可选：把对账挂成 pre-commit**（只跑离线且快的 reconcile）：
 
@@ -590,6 +593,41 @@ CLI 争抢所有权。两者不可兼得。
 
 结果：`lock 52 = 磁盘 52 已声明 + 3 自有`，`scripts/expected-gaps.json` 清空，对账零差异。
 
+### 2026-09-28 · Codex 指令层纳管（本机）
+
+拉取到「Codex 一等公民」的设计后，本机 `bootstrap` 报了 `conflict` 且 `verify` 失败：
+本机的 `~/.codex/AGENTS.md` **不是**共享 AGENTS.md 的投影，而是作者自己的 9.9KB
+Codex 指令文件（12 节：语言偏好 / 配置与操作安全 / Git 与交付 / …），零仓库特征词。
+
+结论：**把那份个人文件纳管**——内容作为 `adapters/codex/AGENTS.md` 入库，
+`~/.codex/AGENTS.md` 改为指向它的软链。共享规范**不需要**并入或 `@` 导入：
+Codex 自己内嵌的 spec 写着「the AGENTS.md file at the root of the repo and any
+directories from the CWD up to the root are included」——即它会读祖先链上的
+`AGENTS.md`，而 `~/AGENTS.md` 本来就是我们的投影。（这条是从 `codex` 二进制里
+读出来的，不是靠模型探针。）
+
+⚠️ **跨机注意**：`adapters/codex/AGENTS.md` 现在只有一份。另一台机器如果也有自己的
+`~/.codex/AGENTS.md`，拉取后 `bootstrap` 会把它指向本仓库这份 → **先备份并合并**你
+在两边的内容，否则会丢一份。
+
+### 2026-09-28 · 宿主版本不钉，改用符号契约探针
+
+- **起因**：`pinned-versions.json` 里 `piVerifiedWith` / `codexVerifiedWith` 两个「实测过的
+  版本」，在实际机器上对不上（codex 实测 `0.154.0`），而「本机环境事实」那行写的又是
+  pi 0.87.1 / Codex 0.157.1 / Claude Code 2.1.274——三个数全错。同一仓库里三处版本号
+  互相矛盾。
+- **判断**：这三样东西性质不同，不能一起钉。`skillsCli` 是**行为契约**（脚本真的执行它
+  并对齐过其怪癖）→ 钉；`piVerifiedWith` 是**脆弱性标记**，但用版本号表示最弱（只提示
+  不拦，且只覆盖 4 个耦合包里的 1 个）→ 换成探针；`codexVerifiedWith` 是**空 pin**
+  （Codex 的检查是纯文件系统软链判断，与二进制版本无关）→ 删；README 里「已装版本」
+  是**手抄缓存**（一条命令能查到的，留给环境）→ 删。
+- **落地**：`pinned-versions.json` 只留 `skillsCli`；`verify` 把实测版本打在末尾
+  （`observed live, not pinned`）；新增 `scripts/lib/adapter-contract.mjs`，读**已安装**包
+  的声明文件，核对适配层 import 的每个值符号是否仍被导出（当前 16 个符号 / 4 个包），
+  改名即失败并点出符号名。
+- **代价**：探针是静态的——同名改签名看不见；`import type` 不纳入（转译时被擦除）。
+  两条都写进了「残余风险」第 3 条。
+
 ## 项目级技能
 
 规范允许项目自带技能，位置是 `<project>/.agents/skills/`（以及祖先目录，最多上溯到
@@ -621,11 +659,13 @@ git 仓库根）。策略：
 2. **github 源的漂移没有自动检测。** `drift.mjs` 只逐个校验 `well-known` 源（当前
    28 条，比对上游 `index.json` 的 digest）。github 源的 `skillFolderHash` 目前没有
    校验路径，要验只能人工 `diff -rq` 与上游比对。
-3. **升级断链风险（有意接受）。** `adapters/pi/` 下的 agent 定义、prompt 模板与
-   subagent 扩展是从 pi 的 `examples/` vendor 进来的，不再跟随上游。若 pi 升级改了
-   导出符号（`BorderedLoader` / `convertToLlm` / `copyToClipboard` /
-   `serializeConversation`）或 subagent 扩展的 API，需要人工复核；`verify` 在 pi 版本
-   不等于 `pinned-versions.json` 的 `piVerifiedWith` 时只**提示**，不拦。
+3. **升级断链风险（有意接受，能探但不全）。** `adapters/pi/` 下的 agent 定义、
+   prompt 模板与扩展是从 pi 的 `examples/` vendor 进来的，不再跟随上游。`verify` 的
+   `adapter contract` 探针核对适配层 import 的每个**值**符号是否仍被导出（当前 16 个
+   符号 / 4 个包：`pi-coding-agent`、`pi-tui`、`pi-ai`、`typebox`），改名即失败并点出
+   符号名。探针**看不见**的是：同名但签名或行为变了；`import type` 的符号（转译时被
+   擦除，改坏不影响到运行）；以及任何静态检查都看不见的运行时行为。升级 pi 后仍值得
+   人工复核一遍这两个 harness 的入口。
    Claude Code 已于 2026-09-28 移出本项目，所以它那条 `@` 导入按**真实路径**解析
    的隐式契约也不再有人验——将来若重新接入，它是第一个要重新实测的东西。
 4. **`skills` CLI 的行为会漂移。** 脚本钉在 `skillsCli=1.7.0`，但该 CLI：对
@@ -643,24 +683,6 @@ git 仓库根）。策略：
    依赖本地纪律。
 9. **`drift` 与 `restore` 需要网络。** 本机对 `github.com:443` 曾多次抖动（演练中
    就遇到 `fetch` / `push` 超时），因此拉取与复原可能要重试。
-
-
-### 2026-09-28 · Codex 指令层纳管（本机）
-
-拉取到「Codex 一等公民」的设计后，本机 `bootstrap` 报了 `conflict` 且 `verify` 失败：
-本机的 `~/.codex/AGENTS.md` **不是**共享 AGENTS.md 的投影，而是作者自己的 9.9KB
-Codex 指令文件（12 节：语言偏好 / 配置与操作安全 / Git 与交付 / …），零仓库特征词。
-
-结论：**把那份个人文件纳管**——内容作为 `adapters/codex/AGENTS.md` 入库，
-`~/.codex/AGENTS.md` 改为指向它的软链。共享规范**不需要**并入或 `@` 导入：
-Codex 自己内嵌的 spec 写着「the AGENTS.md file at the root of the repo and any
-directories from the CWD up to the root are included」——即它会读祖先链上的
-`AGENTS.md`，而 `~/AGENTS.md` 本来就是我们的投影。（这条是从 `codex` 二进制里
-读出来的，不是靠模型探针。）
-
-⚠️ **跨机注意**：`adapters/codex/AGENTS.md` 现在只有一份。另一台机器如果也有自己的
-`~/.codex/AGENTS.md`，拉取后 `bootstrap` 会把它指向本仓库这份 → **先备份并合并**你
-在两边的内容，否则会丢一份。
 
 10. **Codex 的共享规范靠「指针」而非自动注入，且行为验证依赖 `chatgpt.com` 可达。**
     Codex 只读 `$CODEX_HOME/AGENTS.md`，不读 `~/AGENTS.md`、不支持 `@` 导入（均为实测），
@@ -696,9 +718,9 @@ directories from the CWD up to the root are included」——即它会读祖先�
   （本机目前有 2 条禁用：`documentation-writer`、`humanizer-zh`）。
 
 - **两个 harness 已接入为一等 agent**（2026-09-28）：pi、Codex。Codex 的接入最小
-  ——它原生读 `AGENTS.md`（含全局 `$CODEX_HOME/AGENTS.md`）并原生扫
-  `.agents/skills/`，所以只需一条投影（`AGENTS.md` → `~/.codex/AGENTS.md`），既不要
-  入口文件也不要技能软链。实测 `codex --version` = `0.157.1`。
+  ——它原生读 `AGENTS.md` 并原生扫 `.agents/skills/`；`$CODEX_HOME/AGENTS.md` 那条投影
+  指到 `adapters/codex/AGENTS.md`（作者自己的长文指令层，已纳管入库），共享规范经祖先
+  链的 `~/AGENTS.md` 叠加到它上面，既不要入口文件也不要技能软链。
 - **Claude Code 已移出本项目**（2026-09-28）：入口文件、投影、`verify` 检查与
   `pinned-versions` 条目全部删除；`restore.mjs` 的 `-a claude-code` 也去掉（**保留
   `zed`**，它才是让文件落进 `~/.agents/skills/` 的那个）。本机 `~/.claude/CLAUDE.md`
@@ -737,8 +759,10 @@ directories from the CWD up to the root are included」——即它会读祖先�
   调用（未全局安装）。
 - 不可用（不要假设存在）：`pnpm`、`stow`、`chezmoi`。
 - 默认 shell 为 zsh。
-- 已装 harness：pi 0.87.1、Codex 0.157.1。Claude Code 2.1.274 仍在机器上
-  （`/opt/homebrew/bin/claude`），但已移出本项目。
+- 已装 harness：pi、Codex。Claude Code 仍在机器上（`/opt/homebrew/bin/claude`），
+  但已移出本项目。**版本不在这里写**：它是现场能观测的事实，`pi --version` /
+  `codex --version` 一查即得，`node scripts/harness.mjs verify` 也会把实测值打出来
+  （写死在文档里只会变成陈数字）。
 - 常用项目根目录：`~/Desktop/`、`~/Documents/`、`~/conductor/repos/`——这些下面有
   带项目级 `.agents/skills/` 的仓库（`rm-relay`、`ielts_writing_helper`、
   `Quickstart`），它们的技能目前不在 lock 里。
