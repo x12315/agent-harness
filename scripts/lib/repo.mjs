@@ -12,6 +12,12 @@ import { fileURLToPath } from "node:url";
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const HOME = process.env.HOME ?? "";
 export const SKILLS_DIR = join(REPO, "skills");
+/** Engineering declaration (shared, versioned). Personalization must NOT live here. */
+export const SHARED_PI_SETTINGS = join(REPO, "adapters/pi/settings.json");
+/** Machine-local pi settings: a real file, merged by bootstrap, never a projection. */
+export const LOCAL_PI_SETTINGS = join(HOME, ".pi/agent/settings.json");
+/** Keys that belong to the engineering layer; everything else is personalization. */
+export const ENGINEERING_SETTING_KEYS = ["packages"];
 export const LOCK_PATH = join(REPO, ".skill-lock.json");
 export const GAPS_PATH = join(REPO, "scripts/expected-gaps.json");
 export const PINS_PATH = join(REPO, "scripts/pinned-versions.json");
@@ -80,7 +86,6 @@ export function managedLinks() {
     // author's own, versioned in adapters/codex/; the shared rules reach Codex
     // through ancestor discovery (~/AGENTS.md), see README's projection table.
     ["adapters/codex/AGENTS.md", join(HOME, ".codex/AGENTS.md")],
-    ["adapters/pi/settings.json", join(HOME, ".pi/agent/settings.json")],
   ];
   const fileDirs = [
     ["adapters/pi/prompts", join(HOME, ".pi/agent/prompts")],

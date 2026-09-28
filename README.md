@@ -50,7 +50,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `adapters/pi/extensions/subagent/*.ts`    | `~/.pi/agent/extensions/subagent/*.ts` | 同上（子目录形式）           |
 | `adapters/pi/prompts/*.md`                | `~/.pi/agent/prompts/*.md`    | pi 的 prompt 模板发现位                |
 | `adapters/pi/agents/*.md`                 | `~/.pi/agent/agents/*.md`     | pi 的 subagent 定义发现位              |
-| `adapters/pi/settings.json`                | `~/.pi/agent/settings.json`   | pi 的 packages 声明要入库，产物（`npm/`、`git/`）不入库 |
+| `adapters/pi/settings.json`                | —（**不是投影，是合并源**）    | 只放工程键（`packages`）；本机文件由 bootstrap 合并 —— 见「工程与个性化的边界」 |
 | `adapters/codex/AGENTS.md`                 | `~/.codex/AGENTS.md`          | Codex 只读 `$CODEX_HOME/AGENTS.md`（实测不读 `~/AGENTS.md`，也不支持 `@` 导入）；该文件是作者的个人指令层，顶部有一段**指针**要求先读共享规范 |
 | `skills/`                                 | —（无需投影）                 | pi 与 Codex 都原生扫描 `~/.agents/skills/`；只有不读中立路径的 harness 才需要软链，由 `skills` CLI 建 |
 
@@ -693,6 +693,20 @@ git 仓库根）。策略：
     注意这依赖模型**服从指针**，不是机制强制；而且 `codex exec` 还要
     `chatgpt.com/backend-api` 可达（本机曾不可达 → 卡在 `Reconnecting…`，根因是 Clash
     分流，见「已知情况」）。网络或模型行为变化时应重跑该探针。
+
+### 2026-09-28 · 划定工程／个性化边界
+
+`~/.pi/agent/settings.json` 之前是仓库文件的**整份软链**，于是「改本机模型」=「改仓库」，
+两台机器互相覆盖：仓库里一度是另一台机器的 `qingxian-high` / `gpt-5.6-terra`，而本机
+没有这个 provider，pi 只能回退（实测回退到 `openai-codex/gpt-5.5`）。
+
+改为按边界拆开：仓库只存工程键（`packages`）；本机保留**实体** `settings.json`，
+`bootstrap` 合并、`verify` 强制。本机个性化值按**本机历史**恢复为
+`deepseek` / `deepseek-v4-flash`（见提交 `7082513`）。
+
+⚠️ **另一台机器的后果**：它那里的 `~/.pi/agent/settings.json` 同样是软链，拉取后第一次
+`install` 会把它转成实体文件（工程键来自仓库）。它原来的模型选择
+（`qingxian-high`）会消失——因为该键已不属于工程层——需要在那边**重选一次模型**。
 
 ## 已知情况
 

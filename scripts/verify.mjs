@@ -15,7 +15,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpat
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { checkAdapterContract } from "./lib/adapter-contract.mjs";
-import { HOME, REPO, isInsideRepo, isSymlink, managedLinks } from "./lib/repo.mjs";
+import { ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, REPO, SHARED_PI_SETTINGS, isInsideRepo, isSymlink, managedLinks, readJson } from "./lib/repo.mjs";
 
 /**
  * Compare paths through realpath: a repo under a symlinked prefix (macOS /tmp ->
@@ -206,8 +206,53 @@ function observedVersions() {
   return versions.length ? [`${versions.join(", ")} (observed live, not pinned)`] : [];
 }
 
+/**
+ * The engineering/personalization boundary, enforced mechanically.
+ *
+ * Engineering (shared, versioned): only the keys in ENGINEERING_SETTING_KEYS -
+ * today just `packages`. Personalization (model, provider, thinking level,
+ * theme, toggles) is per machine and lives in a real local file, because a
+ * symlink into the repo cannot carry per-machine values: two machines would
+ * overwrite each other's choices on every pull.
+ */
+function checkSettingsBoundary() {
+  const problems = [];
+  let shared = {};
+  try {
+    shared = readJson(SHARED_PI_SETTINGS);
+  } catch (error) {
+    problems.push(`adapters/pi/settings.json unreadable: ${error.message}`);
+  }
+  const personalInShared = Object.keys(shared).filter((k) => !ENGINEERING_SETTING_KEYS.includes(k));
+  if (personalInShared.length) {
+    problems.push(`adapters/pi/settings.json carries personalization: ${personalInShared.join(", ")} - it belongs in the machine-local file`);
+  }
+  if (!existsSync(LOCAL_PI_SETTINGS)) {
+    problems.push(`${LOCAL_PI_SETTINGS}: missing; run node scripts/harness.mjs install`);
+  } else if (isSymlink(LOCAL_PI_SETTINGS)) {
+    problems.push(`${LOCAL_PI_SETTINGS}: still a symlink into the repo; run node scripts/harness.mjs install to convert it to a real file`);
+  } else {
+    try {
+      const local = readJson(LOCAL_PI_SETTINGS);
+      for (const key of ENGINEERING_SETTING_KEYS) {
+        if (JSON.stringify(local[key] ?? null) !== JSON.stringify(shared[key] ?? null)) {
+          problems.push(`${LOCAL_PI_SETTINGS}: ${key} differs from the shared declaration; run install to merge`);
+        }
+      }
+    } catch (error) {
+      problems.push(`${LOCAL_PI_SETTINGS} unreadable: ${error.message}`);
+    }
+  }
+  return {
+    name: "settings boundary",
+    status: problems.length ? "fail" : "pass",
+    detail: `engineering keys (${ENGINEERING_SETTING_KEYS.join(", ")}) shared; model/provider/theme stay machine-local`,
+    problems,
+  };
+}
+
 export function run({ json = false } = {}) {
-  const checks = [checkPi(), checkCodex(), checkAdapterContract(), checkProjections(), checkHygiene()];
+  const checks = [checkPi(), checkCodex(), checkAdapterContract(), checkProjections(), checkHygiene(), checkSettingsBoundary()];
   const notes = observedVersions();
   const ok = checks.every((c) => c.status !== "fail");
   if (json) {

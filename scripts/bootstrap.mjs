@@ -8,10 +8,10 @@
  *
  * Exit 0 only when every projection is in place afterwards.
  */
-import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { REPO, managedLinks, pins, relTarget } from "./lib/repo.mjs";
+import { ENGINEERING_SETTING_KEYS, LOCAL_PI_SETTINGS, REPO, SHARED_PI_SETTINGS, managedLinks, pins, relTarget } from "./lib/repo.mjs";
 
 /**
  * Relative link target computed from the directory's REAL path.
@@ -54,12 +54,19 @@ export function run({ apply = false, json = false } = {}) {
     );
   }
 
+  // Engineering vs personalization. The shared declaration carries only
+  // engineering keys (packages); the machine keeps its own model/provider/theme
+  // in a real local file. bootstrap merges the engineering keys in and leaves
+  // everything else alone, so two machines never overwrite each other's choices.
+  const settingsActions = mergeSettings({ apply });
+
   const counts = actions.reduce((acc, a) => ((acc[a.action] = (acc[a.action] ?? 0) + 1), acc), {});
   // After --apply the create/fix actions are done, so only conflicts and skips
   // are failures; in dry-run mode anything not already ok is pending work.
+  const settingsOk = settingsActions.every((a) => a.action === "ok");
   const ok = apply
-    ? (counts.conflict ?? 0) === 0 && (counts.skip ?? 0) === 0
-    : (counts.ok ?? 0) === actions.length;
+    ? (counts.conflict ?? 0) === 0 && (counts.skip ?? 0) === 0 && settingsActions.every((a) => a.action !== "conflict")
+    : (counts.ok ?? 0) === actions.length && settingsOk;
 
   if (json) {
     console.log(JSON.stringify({ ok, apply, counts, actions }, null, 2));
@@ -68,12 +75,60 @@ export function run({ apply = false, json = false } = {}) {
       const mark = { ok: "ok  ", create: apply ? "made" : "todo", fix: apply ? "fixed" : "todo", skip: "SKIP", conflict: "FAIL" }[a.action];
       console.log(`${mark}  ${a.target}  ${a.action === "ok" ? "" : `(${a.detail})`}`);
     }
+    for (const a of settingsActions) {
+      const mark = { ok: "ok  ", create: apply ? "made" : "todo", convert: apply ? "conv" : "todo", merge: apply ? "mrge" : "todo" }[a.action];
+      console.log(`${mark}  ${a.target}  ${a.action === "ok" ? "" : `(${a.detail})`}`);
+    }
     console.log(`projections: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ")}${apply ? "" : "  [dry run]"}`);
     if (!ok && !apply) console.log(`re-run with --apply to write the ${(counts.create ?? 0) + (counts.fix ?? 0)} pending projection(s)`);
     if (!ok && apply) console.log("bootstrap: FAILED - resolve the conflicts/skips above");
     else console.log(ok ? "bootstrap: OK" : "bootstrap: pending");
   }
   return ok ? 0 : 1;
+}
+
+/**
+ * Merge the engineering declaration into the machine-local settings.
+ *
+ * A legacy projection (symlink into the repo) is converted to a real file: a
+ * symlink cannot carry per-machine values, which is exactly the bug this fixes.
+ * Returns the same action records shape as the projection loop.
+ */
+export function mergeSettings({ apply = false } = {}) {
+  const shared = JSON.parse(readFileSync(SHARED_PI_SETTINGS, "utf8"));
+  const engineering = {};
+  for (const key of ENGINEERING_SETTING_KEYS) {
+    if (key in shared) engineering[key] = shared[key];
+  }
+
+  const legacy = existsSync(LOCAL_PI_SETTINGS) && lstatSync(LOCAL_PI_SETTINGS).isSymbolicLink();
+  let personal = {};
+  if (existsSync(LOCAL_PI_SETTINGS)) {
+    try {
+      const current = JSON.parse(readFileSync(LOCAL_PI_SETTINGS, "utf8"));
+      for (const [k, v] of Object.entries(current)) {
+        if (!ENGINEERING_SETTING_KEYS.includes(k)) personal[k] = v;
+      }
+    } catch {
+      /* unreadable: treat as no personalization rather than clobbering blindly */
+    }
+  }
+  const desired = { ...personal, ...engineering };
+  const serialized = `${JSON.stringify(desired, null, 2)}\n`;
+  let currentText = null;
+  try {
+    currentText = readFileSync(LOCAL_PI_SETTINGS, "utf8");
+  } catch {
+    /* missing */
+  }
+
+  const action = legacy ? "convert" : currentText === null ? "create" : currentText === serialized ? "ok" : "merge";
+  if (apply && action !== "ok") {
+    mkdirSync(dirname(LOCAL_PI_SETTINGS), { recursive: true });
+    if (legacy) rmSync(LOCAL_PI_SETTINGS, { force: true });
+    writeFileSync(LOCAL_PI_SETTINGS, serialized);
+  }
+  return [{ target: LOCAL_PI_SETTINGS, action, detail: legacy ? "symlink -> real file (engineering + personalization)" : "engineering keys from adapters/pi/settings.json" }];
 }
 
 export function nextSteps() {
