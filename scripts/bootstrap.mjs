@@ -8,11 +8,20 @@
  *
  * Exit 0 only when every projection is in place afterwards.
  */
-import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { REPO, managedLinks, pins, relTarget } from "./lib/repo.mjs";
 
+/**
+ * Relative link target computed from the directory's REAL path.
+ *
+ * On macOS /tmp is a symlink to /private/tmp, so a textual relative path
+ * between a /tmp projection and a realpath'd repo would climb to the filesystem
+ * root and come back down ("../../../../../../../private/tmp/..."). Resolving
+ * the parent first keeps the link short and stays correct wherever the pair is
+ * moved together.
+ */
 export function run({ apply = false, json = false } = {}) {
   const actions = [];
   for (const [src, target] of managedLinks()) {
@@ -20,11 +29,14 @@ export function run({ apply = false, json = false } = {}) {
     const record = (action, detail) => actions.push({ source: src, target, action, detail });
 
     if (!existsSync(source)) { record("skip", "source missing in repo"); continue; }
-    const want = relTarget(dirname(target), source);
+    mkdirSync(dirname(target), { recursive: true });
+    let realDir = dirname(target);
+    try { realDir = realpathSync(dirname(target)); } catch { /* keep literal */ }
+    const want = relTarget(realDir, source);
 
     if (!existsSync(target)) {
       record("create", want);
-      if (apply) { mkdirSync(dirname(target), { recursive: true }); symlinkSync(want, target); }
+      if (apply) symlinkSync(want, target);
       continue;
     }
     if (lstatSync(target).isSymbolicLink()) {
@@ -43,7 +55,11 @@ export function run({ apply = false, json = false } = {}) {
   }
 
   const counts = actions.reduce((acc, a) => ((acc[a.action] = (acc[a.action] ?? 0) + 1), acc), {});
-  const ok = (counts.ok ?? 0) === actions.length;
+  // After --apply the create/fix actions are done, so only conflicts and skips
+  // are failures; in dry-run mode anything not already ok is pending work.
+  const ok = apply
+    ? (counts.conflict ?? 0) === 0 && (counts.skip ?? 0) === 0
+    : (counts.ok ?? 0) === actions.length;
 
   if (json) {
     console.log(JSON.stringify({ ok, apply, counts, actions }, null, 2));
@@ -63,7 +79,7 @@ export function run({ apply = false, json = false } = {}) {
 export function nextSteps() {
   const { skillsCli } = pins();
   return [
-    `install third-party skills with the pinned CLI: npx --yes skills@${skillsCli} ...`,
+    `restore the declared third-party skills: node scripts/restore.mjs --apply   (pinned skills CLI ${skillsCli})`,
     "then: node scripts/harness.mjs reconcile",
     "then: node scripts/harness.mjs verify",
   ];

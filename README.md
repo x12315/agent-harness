@@ -116,18 +116,18 @@ $EDITOR ~/.agents/skills/<name>/SKILL.md
 
 ```bash
 git clone <this-repo> ~/.agents
-ln -sfn .agents/AGENTS.md ~/AGENTS.md                          # 祖先链发现
-ln -sfn ../../.agents/AGENTS.md ~/.pi/agent/AGENTS.md          # pi 全局指令位
-ln -sfn ../../../.agents/adapters/pi/extensions/handoff.ts \
-        ~/.pi/agent/extensions/handoff.ts                      # pi extension
-ln -sfn ../../.agents/adapters/pi/settings.json \
-        ~/.pi/agent/settings.json                              # pi 全局配置
-npx skills add ...        # 按 .skill-lock.json 逐条复现第三方集
-pi install npm:<pkg>      # 按 adapters/pi/settings.json 的 packages 数组复现 pi 包
+cd ~/.agents
+node scripts/harness.mjs bootstrap --apply   # 14 条投影，不用手打 ln
+node scripts/restore.mjs --apply             # 按 lock 复原第三方技能，14 组
+node scripts/harness.mjs all                 # 对账 + 验收，退出码即结论
 ```
 
-**`skills/` 不需要任何投影**（pi 原生扫描 `~/.agents/skills/`）。装完必须做
-C 的对账——lock 是「应装清单」，不等于磁盘现状。
+`bootstrap` 只写软链；`restore` 默认只打印命令、`--apply` 才装，并且默认跳过已在盘上
+的技能，所以重复执行是安全的。**`skills/` 不需要任何投影**（pi 原生扫描
+`~/.agents/skills/`）。
+
+注意 `restore` 存在的原因是：`skills` CLI **没有全局的「按 lock 安装」命令**——它的
+`experimental_install` 只读项目级 `skills-lock.json`。所以这项工作由本仓库的脚本补上。
 
 ### B. 投影的建立与拆除
 
@@ -321,6 +321,7 @@ node scripts/harness.mjs bootstrap|reconcile|drift|verify [--json]
 | 脚本 | 做什么 | 网络 |
 | --- | --- | --- |
 | `bootstrap.mjs` | 按 `managedLinks()` 把仓库投影到 harness 原生位置。默认 dry run，`--apply` 才写；遇到实体文件/目录挡路只报 `conflict`，**绝不删** | ❌ |
+| `restore.mjs` | 按来源把 lock 分组，复原第三方技能（本机 52 个 → 14 组）。**默认只打印命令**，`--apply` 才装；默认跳过已在盘上的，`--all` 强制全量 | ✅ |
 | `reconcile.mjs` | 声明 vs 实装，按 `sourceType` 分类。差异必须逐条登记在 `scripts/expected-gaps.json`，否则失败 | ❌ |
 | `drift.mjs` | 把 lock 的 `wellKnownDigest` 与上游 `.well-known/agent-skills/index.json` 逐个比对；上游多出来的技能只报告、不失败 | ✅ |
 | `verify.mjs` | 四项：pi 发现、Claude Code 入口、投影都是指向仓库的软链、仓库卫生 | ✅ |
