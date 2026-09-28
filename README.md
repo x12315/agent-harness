@@ -46,10 +46,16 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | ----------------------------------------- | ----------------------------- | -------------------------------------- |
 | `AGENTS.md`                               | `~/AGENTS.md`                 | 祖先目录发现，对所有 agent 通用        |
 | `AGENTS.md`                               | `~/.pi/agent/AGENTS.md`       | pi 的全局指令只认 agent-dir 下这条路   |
-| `adapters/pi/extensions/handoff.ts`       | `~/.pi/agent/extensions/handoff.ts` | pi 的 extension 是厂商私有机制（文件级软链） |
+| `adapters/pi/extensions/*.ts`             | `~/.pi/agent/extensions/*.ts` | pi 扩展是厂商私有机制（文件级软链）    |
+| `adapters/pi/extensions/subagent/*.ts`    | `~/.pi/agent/extensions/subagent/*.ts` | 同上（子目录形式）           |
+| `adapters/pi/prompts/*.md`                | `~/.pi/agent/prompts/*.md`    | pi 的 prompt 模板发现位                |
+| `adapters/pi/agents/*.md`                 | `~/.pi/agent/agents/*.md`     | pi 的 subagent 定义发现位              |
 | `adapters/pi/settings.json`                | `~/.pi/agent/settings.json`   | pi 的 packages 声明要入库，产物（`npm/`、`git/`）不入库 |
 | `skills/<name>/`                          | `~/.claude/skills/<name>`     | 该 harness 不读 `.agents/`，由 `skills` CLI 建软链 |
 | `skills/`                                 | —（无需投影）                 | pi 原生扫描 `~/.agents/skills/`        |
+
+**投影铁律：投影只能指向本仓库。** 指向上游安装目录（如 pi 的 `examples/`）的
+链接会在升级时断掉，或静默换成新版本内容——那等于把真相源搬到仓库之外。
 
 若某个 harness 有自家的指令文件名（例：Claude Code 读 `CLAUDE.md`，且不在
 agents.md 的支持列表里），在 `adapters/<name>/` 下放一个指向 `../../AGENTS.md`
