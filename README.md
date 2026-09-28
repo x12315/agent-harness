@@ -31,6 +31,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 │   └── self-explanatory-code/  # ← 自有
 └── adapters/              # harness 差异只写在这里
     └── pi/
+        ├── settings.json    # pi 的全局配置（含 packages 声明）
         └── extensions/handoff.ts
 ```
 
@@ -46,6 +47,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `AGENTS.md`                               | `~/AGENTS.md`                 | 祖先目录发现，对所有 agent 通用        |
 | `AGENTS.md`                               | `~/.pi/agent/AGENTS.md`       | pi 的全局指令只认 agent-dir 下这条路   |
 | `adapters/pi/extensions/handoff.ts`       | `~/.pi/agent/extensions/handoff.ts` | pi 的 extension 是厂商私有机制（文件级软链） |
+| `adapters/pi/settings.json`                | `~/.pi/agent/settings.json`   | pi 的 packages 声明要入库，产物（`npm/`、`git/`）不入库 |
 | `skills/<name>/`                          | `~/.claude/skills/<name>`     | 该 harness 不读 `.agents/`，由 `skills` CLI 建软链 |
 | `skills/`                                 | —（无需投影）                 | pi 原生扫描 `~/.agents/skills/`        |
 
@@ -94,7 +96,10 @@ ln -sfn .agents/AGENTS.md ~/AGENTS.md                          # 祖先链发现
 ln -sfn ../../.agents/AGENTS.md ~/.pi/agent/AGENTS.md          # pi 全局指令位
 ln -sfn ../../../.agents/adapters/pi/extensions/handoff.ts \
         ~/.pi/agent/extensions/handoff.ts                      # pi extension
+ln -sfn ../../.agents/adapters/pi/settings.json \
+        ~/.pi/agent/settings.json                              # pi 全局配置
 npx skills add ...        # 按 .skill-lock.json 逐条复现第三方集
+pi install npm:<pkg>      # 按 adapters/pi/settings.json 的 packages 数组复现 pi 包
 ```
 
 **`skills/` 不需要任何投影**（pi 原生扫描 `~/.agents/skills/`）。装完必须做
@@ -114,6 +119,12 @@ C 的对账——lock 是「应装清单」，不等于磁盘现状。
 3. **`AGENTS.md` 的两条投影会各注入一次**：pi 按 symlink 路径去重（不是
    realpath），所以 cwd 在 `~` 下时同一份指令进提示词两次（约 803B）。保留两条是
    因为 cwd 在 `~` 之外时只有 agent-dir 那条生效。
+4. **`settings.json` 的投影必须确认写入方式**。`pi install` / `pi config` /
+   `lastChangelogVersion` 都会重写这个文件；只有**原地 `writeFileSync`** 才穿得过
+   软链（写进源文件），若是「写临时文件再 rename」就会把软链替换成普通文件，投影
+   静默失效。pi 0.84.4 走的是前者（`dist/core/settings-manager.js` 的
+   `withLock()`，加锁后 `writeFileSync(path, next)`），实测写穿、软链保留。
+   升级 pi 后若有人报「配置改动没进 git」，先查这一条。
 
 ### C. lock 与磁盘对账
 
@@ -280,7 +291,8 @@ git push -u origin main
 | 类别 | 例子 | 管理机制 | 入库？ |
 | --- | --- | --- | --- |
 | 第三方 skill | `skills/lark-*/` | `skills` CLI，锁定在 `.skill-lock.json` | ❌ 不 vendor |
-| 依赖清单 | `.skill-lock.json` | 归 git 管 | ✅ |
+| skill 依赖清单 | `.skill-lock.json` | 归 git 管 | ✅ |
+| pi 包 | `~/.pi/agent/npm/pi-goal-x` | `pi install`，声明写在 `adapters/pi/settings.json` | ❌ 不 vendor |
 | 自有 skill | `skills/agent-harness/` | 直接写 | ✅ |
 
 原则与 `node_modules` / `package-lock.json` 相同：**依赖产物不入库，声明入库。**
@@ -352,12 +364,28 @@ CLI 争抢所有权。两者不可兼得。
 `skills list` 会把 `agent-harness` 也列进它的清单（标为 `Source: local`），
 所以不要用 `skills remove` 的交互式全选来清理——会误删自有 skill。
 
-## 尚未版本化的东西
+## pi 包的声明
 
-`~/.pi/agent/settings.json` 里的 `packages` 数组（[pi
-packages](https://pi.dev/packages) 声明）目前**不在**本仓库里，而本机已经不是空的
-（`["npm:pi-web-ui"]`）。一旦这份声明开始变化，应按同样原则搬进来——声明入库，
-`node_modules` 之类的产物不入库。
+[pi packages](https://pi.dev/packages) 的声明曾经不在本仓库里。现已按
+「声明入库，产物不入库」收编：
+
+| 层 | 路径 | 入库 |
+| --- | --- | --- |
+| 声明 | `adapters/pi/settings.json`（投影到 `~/.pi/agent/settings.json`） | ✅ |
+| 产物 | `~/.pi/agent/npm/`、`~/.pi/agent/git/` | ❌ |
+
+本机当前声明（2026-09-28）：
+
+```json
+"packages": ["npm:pi-web-ui", "npm:pi-goal-x"]
+```
+
+整个 `settings.json` 一起入库，而不是只抽 `packages` 数组：pi 只认这一个文件，
+拆成「声明片段 + 手工合并」反而多一道易漏的同步工序。代价是 `theme`、`defaultModel`
+和每次升级 pi 都会变的 `lastChangelogVersion` 也进了 git——看作「本机 pi 配置的
+完整快照」，就不算噪声。
+
+换机器：先按 A 建好软链，再按 `packages` 数组逐条 `pi install`。
 
 ## 已知情况
 
@@ -375,3 +403,10 @@ packages](https://pi.dev/packages) 声明）目前**不在**本仓库里，而�
 - **git 身份来自全局配置**（`montana <2398925789@qq.com>`），仓库里没有
   repo-local 覆盖，与早先 README 的描述不同。
 - `~/.pi/agent/skills/` 是个空目录，保留（pi 原生全局技能位，将来放厂商专用技能）。
+- **`~/.pi/agent/settings.json` 是软链**（2026-09-28）：投影自
+  `adapters/pi/settings.json`，为的是把 pi 包的声明入库。写穿已实测（见 B 的规则 4）。
+- **装了 `npm:pi-goal-x`**（2026-09-28）：pi 的 `/goal` 型长任务循环包，由
+  `pi install` 装入 `~/.pi/agent/npm/`。它属于「声明入库、产物不入库」里的产物，
+  所以在 `adapters/pi/settings.json` 里有声明，仓库里没有文件。装完实测：76 个命令
+  （skill 54 + extension 19 + prompt 3），其中 16 个 goal 命令，stderr 为空，
+  skill 的 `baseDir` 全部指向 `~/.agents`。
