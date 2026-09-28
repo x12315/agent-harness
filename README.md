@@ -494,6 +494,39 @@ git 仓库根）。策略：
    find ~ -maxdepth 6 -path '*/.agents/skills/*' -name SKILL.md | sed 's#/SKILL.md##'
    ```
 
+## 残余风险
+
+按「可验证到什么程度」如实记录，避免把「全绿」误读成「什么都验过」。
+
+1. **只有 pi 与 Claude Code 是实机验证过的 harness。** codex / gemini / cursor /
+   opencode / zed 等只有「接入新 harness 的模板」，没有任何实测；`verify` 也不会
+   覆盖它们。中立层（`.agents/skills/`）理论上对它们生效，但那是规范推论，不是观测。
+2. **github 源的漂移没有自动检测。** `drift.mjs` 只逐个校验 `well-known` 源（当前
+   28 条，比对上游 `index.json` 的 digest）。github 源的 `skillFolderHash` 目前没有
+   校验路径，要验只能人工 `diff -rq` 与上游比对。
+3. **升级断链风险（有意接受）。** `adapters/pi/` 下的 agent 定义、prompt 模板与
+   subagent 扩展是从 pi 的 `examples/` vendor 进来的，不再跟随上游。若 pi 升级改了
+   导出符号（`BorderedLoader` / `convertToLlm` / `copyToClipboard` /
+   `serializeConversation`）或 subagent 扩展的 API，需要人工复核；`verify` 在 pi 版本
+   不等于 `pinned-versions.json` 的 `piVerifiedWith` 时只**提示**，不拦。
+   同理，Claude Code 的 `@` 导入按**真实路径**解析是实测出的隐式契约，上游若改行为
+   需要重新实测（探针已内置在 `verify`）。
+4. **`skills` CLI 的行为会漂移。** 脚本钉在 `skillsCli=1.7.0`，但该 CLI：对
+   `well-known` 源不支持 `--json`；批量调用会瞬时失败（`restore` 已加 retry）；
+   `experimental_install` 只认**项目级** `skills-lock.json`（所以本仓库才需要
+   `restore.mjs`）。上游一变，pin 与脚本都要重新实测。
+5. **凭据天然是每台机器各自的。** 新机器必须分别登录 pi 与 Claude Code；`verify`
+   对未登录的 harness 只 `skip` 而不判失败。所以**看到全绿前请确认那两项是 `pass`
+   而不是 `skip`**。
+6. **项目级技能不在对账范围内。** `<project>/.agents/skills/` 由项目自负（见「项目级
+   技能」）。本机有 3 个项目各带一份，属设计如此。
+7. **`skills/` 是「构建产物落在源码树里」。** 隔离靠 `.gitignore` 白名单，忘加白名单
+   会**静默**不入库（`AGENTS.md` 把它列为硬规则，但工具无法强制）。
+8. **没有远端 CI 门禁。** pre-commit 是本机可选项，远端不检查，所以「提交即可信」
+   依赖本地纪律。
+9. **`drift` 与 `restore` 需要网络。** 本机对 `github.com:443` 曾多次抖动（演练中
+   就遇到 `fetch` / `push` 超时），因此拉取与复原可能要重试。
+
 ## 已知情况
 
 - **28 个 `lark-*` 已收编入库**（2026-09-28）：由 `skills` CLI 从飞书 well-known
