@@ -159,9 +159,9 @@ C 的对账——lock 是「应装清单」，不等于磁盘现状。
 
 | 类别 | 数量 | 明细 |
 | --- | --- | --- |
-| lock 声明 | 55 | github 27 + well-known 28 |
+| lock 声明 | 52 | github 24 + well-known 28 |
 | 磁盘实装 | 55 | 已声明 52（28 个 `lark-*` + 24 个 github）+ 未登记 0 + 自有 3 |
-| 已声明未安装 | 3 | `ielts`、`session-handoff`、`session-history` |
+| 已声明未安装 | 0 | — |
 | 已安装未声明 | 0 | — |
 
 收编记录（2026-09-28）：原本 9 个无来源技能全部处理完：
@@ -450,6 +450,49 @@ CLI 争抢所有权。两者不可兼得。
 
 换机器：先按 A 建好软链，再按 `packages` 数组逐条 `pi install`。
 
+## 决策记录
+
+### 2026-09-28 · 声明与实装对齐到零差异
+
+- **`session-handoff` → 装上。** 源 `softaworks/agent-toolkit`，自带 python 脚本
+  （`create_handoff.py` / `validate_handoff.py` 等），python3 本机可用，是自洽技能。
+  它与 pi 的 `/handoff` 扩展是同一问题的两种解法、互不依赖：扩展产出提示词进剪贴板，
+  技能产出落盘文档。
+- **`ielts` → 删声明。** 它是 `ielts-speaking` 的父技能，而该家族已被作者弃用
+  （`ielts-speaking` 已移除），磁盘上早已不存在，属历史幽灵声明。恢复方式：
+  `npx --yes skills@1.7.0 add YANZHANLIN/ielts-claude-skills -s ielts -g -a zed claude-code -y`
+- **`session-history` → 删声明。** 源 `rohitg00/agentmemory` 的 `skillPath` 在
+  `plugin/skills/` 下，其 SKILL.md 第一句就调用 `memory_sessions` 工具，而该工具只随
+  agentmemory 插件存在（本机未装）。单独安装等于装一个空壳，违反「声明即可用」。
+  恢复方式：先装 agentmemory 插件，再
+  `npx --yes skills@1.7.0 add rohitg00/agentmemory -s session-history -g -a zed claude-code -y`
+- **`skills/.openclaude/` → 隔离。** 22 个目录的无主嵌套副本：既不是上层技能的镜像，
+  也不是 OpenClaude 真目录 `~/.openclaude/skills` 的镜像（与后者有 80 处差异）。
+  OpenClaude 读的是自己的目录，所以移走无影响。已移到
+  `/tmp/agents-quarantine/openclaude-skills-nested-<ts>/`，全量快照见
+  `/tmp/agents-before-task5-*.tar.gz`。
+
+结果：`lock 52 = 磁盘 52 已声明 + 3 自有`，`scripts/expected-gaps.json` 清空，对账零差异。
+
+## 项目级技能
+
+规范允许项目自带技能，位置是 `<project>/.agents/skills/`（以及祖先目录，最多上溯到
+git 仓库根）。策略：
+
+1. **项目技能属于项目。** 它是与全局 `~/.agents/skills/` 平行的独立集合：不进全局
+   lock，也不由全局的 `skills` CLI 管。
+2. **禁止反向链。** 全局位置不得软链进项目——曾经有过
+   `~/.agents/skills/ielts-writing -> ~/Desktop/ielts_writing_helper/.agents/skills/...`，
+   那会让全局技能依赖某个项目的存在，项目一移走就断。
+3. **要全局可用就收成自有技能**：把内容搬进 `skills/<name>/` 并加 `.gitignore`
+   白名单，而不是留软链。
+4. 本机现状：`rm-relay`、`ielts_writing_helper`、`Quickstart` 各带项目级技能，未纳入
+   lock —— 这是设计如此，不是缺口。要摸清全盘：
+
+   ```bash
+   find ~ -maxdepth 6 -path '*/.agents/skills/*' -name SKILL.md | sed 's#/SKILL.md##'
+   ```
+
 ## 已知情况
 
 - **28 个 `lark-*` 已收编入库**（2026-09-28）：由 `skills` CLI 从飞书 well-known
@@ -460,9 +503,9 @@ CLI 争抢所有权。两者不可兼得。
 - **`~/.pi/agent/skills/` 现在没有软链**。历史上那里有 5 条指向
   `~/.agents/skills/` 的软链（非 lark），已按 B 的规则 1 删除；实测技能数 27→27、
   无警告。
-- **`~/.agents/skills/.openclaude/skills/` 是一棵重复树**：22 个目录，其中 21 个与
-  上层同名目录逐字节相同，另有一个 `grill-me`。看着像 OpenClaude 的安装目标，
-  与本仓库无关。pi 的技能加载器**跳过点目录**，所以它不造成重复发现，纯占空间。
+- **`skills/.openclaude/` 已隔离**（2026-09-28）：那是 22 个目录的无主嵌套副本，
+  已移到 `/tmp/agents-quarantine/`，详见「决策记录」。`skills/` 下现在只有 `.DS_Store`
+  这类 OS 噪声（已 gitignore）。
 - **git 身份来自全局配置**（`montana <2398925789@qq.com>`），仓库里没有
   repo-local 覆盖，与早先 README 的描述不同。
 - `~/.pi/agent/skills/` 是个空目录，保留（pi 原生全局技能位，将来放厂商专用技能）。

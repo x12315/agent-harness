@@ -99,15 +99,6 @@
       "installedAt": "2026-06-19T10:33:37.382Z",
       "updatedAt": "2026-06-19T10:33:37.382Z"
     },
-    "ielts": {
-      "source": "YANZHANLIN/ielts-claude-skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/YANZHANLIN/ielts-claude-skills.git",
-      "skillPath": "ielts/SKILL.md",
-      "skillFolderHash": "470b10cdffef398d12d253cc5ddb45ccefef9b75",
-      "installedAt": "2026-06-12T10:30:08.690Z",
-      "updatedAt": "2026-06-12T11:20:19.243Z"
-    },
     "lark-approval": {
       "source": "open.feishu.cn",
       "sourceType": "well-known",
@@ -431,16 +422,7 @@
       "skillPath": "skills/session-handoff/SKILL.md",
       "skillFolderHash": "9038976da9e22fa34168feb813ef18082fe005b1",
       "installedAt": "2026-07-04T14:06:20.803Z",
-      "updatedAt": "2026-07-04T14:06:20.803Z"
-    },
-    "session-history": {
-      "source": "rohitg00/agentmemory",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/rohitg00/agentmemory.git",
-      "skillPath": "plugin/skills/session-history/SKILL.md",
-      "skillFolderHash": "215602eb80c1351f661ad912bda8b3c81ce82697",
-      "installedAt": "2026-07-04T14:06:27.171Z",
-      "updatedAt": "2026-07-04T14:06:27.171Z"
+      "updatedAt": "2026-09-28T02:39:49.261Z"
     },
     "using-git-worktrees": {
       "source": "obra/superpowers",
