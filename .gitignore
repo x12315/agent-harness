@@ -6,7 +6,13 @@
 # ─────────────────────────────────────────────────────────────
 /skills/*
 !/skills/agent-harness/
+!/skills/book-translation/
+!/skills/self-explanatory-code/
 
 # 系统与编辑器噪声
 .DS_Store
 *.swp
+
+# Python 产物（book-translation 的脚本会生成）
+__pycache__/
+*.pyc

@@ -25,8 +25,10 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 ├── .skill-lock.json       # 第三方 skill 锁定，可复现
 ├── .gitignore             # 屏蔽第三方 skill 安装产物
 ├── skills/                # 权威 skill 源。发现路径本身
-│   ├── lark-*/            #   ← 第三方，已 gitignore
-│   └── agent-harness/     #   ← 自有
+│   ├── lark-*/            #   ← 第三方，已 gitignore（由 skills CLI 装入）
+│   ├── agent-harness/     #   ← 自有
+│   ├── book-translation/  #   ← 自有
+│   └── self-explanatory-code/  # ← 自有
 └── adapters/              # harness 差异只写在这里
     └── pi/
         └── extensions/handoff.ts
@@ -118,21 +120,25 @@ C 的对账——lock 是「应装清单」，不等于磁盘现状。
 `.skill-lock.json`（应装）与 `skills/`（实装）是两份独立数据，必须能解释差异。
 按 `sourceType` 做集合运算，输出三类：**已声明未安装**、**已安装未声明**、**一致**。
 
-本机实测（2026-09-27）：
+本机实测（2026-09-28）：
 
 | 类别 | 数量 | 明细 |
 | --- | --- | --- |
-| lock 声明 | 54 | github 26 + well-known 28 |
-| 磁盘实装 | 55 | 已声明 51（28 个 `lark-*` + 23 个 github）+ 未登记 3 + 自有 1 |
+| lock 声明 | 55 | github 27 + well-known 28 |
+| 磁盘实装 | 55 | 已声明 52（28 个 `lark-*` + 24 个 github）+ 未登记 0 + 自有 3 |
 | 已声明未安装 | 3 | `ielts`、`session-handoff`、`session-history` |
-| 已安装未声明 | 3 | 见下 |
+| 已安装未声明 | 0 | — |
 
-未登记的 3 个没有任何来源元数据（手工 clone 或更早的安装）：
-`book-translation`、`implementing-drag-drop`、`self-explanatory-code`。
-（2026-09-28 已收编 6 个：`executing-plans`、`subagent-driven-development` 归
-`obra/superpowers`；`grilling` 归 `mattpocock/skills`；`ui-ux-pro-max` 归
-`nextlevelbuilder/ui-ux-pro-max-skill`；`ielts-speaking` 归
-`yanzhanlin/ielts-claude-skills`；`macos-design` 归 `ceorkm/macos-design-skill`。）
+收编记录（2026-09-28）：原本 9 个无来源技能全部处理完：
+
+- **归为第三方（7 个）**：`implementing-drag-drop` → `ancoleman/ai-design-components`
+  （收编前逐字节比对：19 文件 / 0 差异）；`executing-plans`、
+  `subagent-driven-development` → `obra/superpowers`；`grilling` →
+  `mattpocock/skills`；`ui-ux-pro-max` → `nextlevelbuilder/ui-ux-pro-max-skill`；
+  `ielts-speaking` → `yanzhanlin/ielts-claude-skills`；`macos-design` →
+  `ceorkm/macos-design-skill`。
+- **归为自有（2 个）**：`book-translation`、`self-explanatory-code` 是作者自制，
+  已加 `.gitignore` 白名单转为自有技能。
 
 未登记技能只有两条出路：**补来源**（重装或手工补 lock 条目）或**判为自有**
 （加白名单）。拖着不处理，它们既不可复现也不入库。
@@ -194,10 +200,21 @@ npx --yes skills@latest add <owner/repo> -s <skill> -g -a zed claude-code -y
 tar czf /tmp/agents-before-absorb-$(date +%Y%m%d-%H%M%S).tar.gz -C ~ .agents
 ```
 
+若能从上游取到同名技能，**装之前先逐文件比对**——一致才说明本地无改动，收编无损：
+
+```bash
+gh api "repos/<owner>/<repo>/git/trees/main?recursive=1" \
+  --jq '.tree[] | select(.path|startswith("skills/<name>/")) | .path'
+# 逐文件取回后用 diff -rq 比对
+```
+
 实测（2026-09-28 收编 6 个）：全部 6 个的 `SKILL.md` 都与磁盘旧版不同（旧版较旧，
 上游文件更多，如 `scripts/`、`catalog-summary.json`），其中 `ielts-speaking` 的
 `rubrics/` 与 `skill-references/` 两个本地独有目录**被删掉了**——要从快照里取回来
 才能合并。若本地有改动，先比对再决定装不装。
+
+对照的是：后来收编的 `implementing-drag-drop` 因先验证过“与上游逐字节一致”
+（19 文件 / 0 差异），收编完全无损。**先验证再装**比事后从快照掘回来省事得多。
 
 ### E. 验证改动是否生效
 

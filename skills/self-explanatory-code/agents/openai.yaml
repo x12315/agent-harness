@@ -1,0 +1,6 @@
+interface:
+  display_name: "Self Explanatory Code"
+  short_description: "约束工程命名、源码注释和公开接口文档，保持代码自解释"
+
+policy:
+  allow_implicit_invocation: true

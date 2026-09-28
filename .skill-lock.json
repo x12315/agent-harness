@@ -533,6 +533,16 @@
       "skillFolderHash": "8f528a2364f996cd42f02a10b1b27198a74ca2a3",
       "installedAt": "2026-09-28T01:49:12.532Z",
       "updatedAt": "2026-09-28T01:49:12.532Z"
+    },
+    "implementing-drag-drop": {
+      "source": "ancoleman/ai-design-components",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/ancoleman/ai-design-components.git",
+      "skillPath": "skills/implementing-drag-drop/SKILL.md",
+      "skillFolderHash": "e7a92f735c686afa2959df959f91403ee41bc952",
+      "pluginName": "ui-interaction-skills",
+      "installedAt": "2026-09-28T01:52:50.842Z",
+      "updatedAt": "2026-09-28T01:52:50.842Z"
     }
   }
 }
