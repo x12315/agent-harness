@@ -32,7 +32,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 └── adapters/              # harness 差异只写在这里
     └── pi/
         ├── settings.json    # pi 的全局配置（含 packages 声明）
-        └── extensions/handoff.ts
+        └── extensions/      # handoff.ts, bookmark.ts
 ```
 
 分层原则：**内容层通用，适配层隔离。** `skills/` 和 `AGENTS.md` 不含任何
@@ -264,10 +264,15 @@ printf '{"id":"1","type":"get_commands"}\n' | pi --mode rpc
 
 1. stderr 为空——有重名或格式错误会在这里报警告
 2. `source=skill` 的每一条 `sourceInfo.baseDir` 都指向 `~/.agents`
-3. 预期的 extension 都在（本机：`handoff`、`webui`、`llama`）
+3. 预期的 extension 都在（本机：`handoff`、`bookmark`、`llama`）
 
-本机实测（2026-09-28）：61 个命令 = skill 55（含 28 个 `lark-*`）+ extension 3 +
-prompt 3，stderr 为空。
+本机实测（2026-09-28）：37 个命令 = skill 31 + extension 6，stderr 为空。
+`bookmark.ts` 一个文件注册 4 条命令（`bookmark` / `bookmarks` / `goto` /
+`unbookmark`）。
+
+注：该次实测时仓库里 15 条投影尚未铺完（3 个 prompt 模板、4 个 subagent 定义、
+Claude 入口都缺），跑 `node scripts/harness.mjs all --apply` 后 prompt 类命令
+才会出现。
 
 命令数取决于实际装了什么，**不要拿固定数字当验收标准**——用“skill 的 `baseDir`
 全部指向 `~/.agents`”和“stderr 为空”这两条。
@@ -347,6 +352,30 @@ git config core.hooksPath scripts/git-hooks   # 取消：git config --unset core
 3. 厂商私有资产（extensions / prompts / agents 之类）放 `adapters/<name>/`，原位置留软链。
 4. 在 `scripts/lib/repo.mjs` 的 `managedLinks()` 加一行，投影表也加一行。
 5. 跑 `node scripts/harness.mjs all`。
+## 收藏（bookmark）
+
+让 pi 里某一次回答既留在原会话里，又能被外部笔记跳转。标签写在原 session
+的 `label` 条目里（历史零改动、不分叉），链接写在 HTML 快照 + markdown 索引里。
+
+```
+/bookmark [标签]     给最后一条 assistant 回答打标签，导出快照，复制链接
+/bookmarks          刷新快照并复制本会话所有书签链接
+/goto [标签|entryId] 跳转到本会话内的书签（省略则列出）
+/unbookmark [标签]   清掉标签（省略则清最后一个）
+```
+
+快照链接是只读的，要回到活会话用 `/goto`：它只能解析当前在 pi 里打开的
+会话，找不到时会翻 `PI_BOOKMARKS_DIR` 下的索引，把可能所属会话的
+`pi --session <path>` 命令列出来。
+
+输出目录默认 `~/.pi/agent/bookmarks/`，每个会话一份 `<session>.html`（快照，
+每次命令重生成）和 `<session>.md`（索引，含 session 路径、`pi --session`
+命令、以及每条书签的 entryId）。可用环境变量覆盖：
+
+- `PI_BOOKMARKS_DIR`：输出目录
+- `PI_BOOKMARKS_BASE_URL`：用 http(s) 基址替换 `file://`，便于在别处托管
+
+`scripts/pi-labels.py` 是不依赖 TUI 的等价实现（适合 cron / 批量导出）。
 
 ## 第三方依赖的管理
 
