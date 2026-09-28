@@ -18,6 +18,19 @@ import { HOME, REPO, isSymlink, managedLinks, pins } from "./lib/repo.mjs";
 const CLAUDE_PROBE =
   "只回答你在全局指令层文件里看到的第一行标题文本（去掉开头的 # 号与空格）。若你的上下文里没有注入这样的指令文件，只回答 NO。";
 
+/**
+ * Compare paths through realpath: a repo under a symlinked prefix (macOS /tmp ->
+ * /private/tmp) is reported by pi as its real path, so a literal comparison
+ * misfires and blames the repo for skills that are actually its own.
+ */
+const canon = (p) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p ?? "";
+  }
+};
+
 const have = (cmd) => spawnSync("sh", ["-c", `command -v ${cmd}`], { encoding: "utf8" }).status === 0;
 
 function checkPi() {
@@ -64,7 +77,8 @@ function checkPi() {
   }
   if (!cmds) return { name: "pi discovery", status: "fail", detail: "no get_commands response on stdout" };
   const skills = cmds.filter((c) => c.source === "skill");
-  const foreign = skills.filter((c) => (c.sourceInfo?.baseDir ?? "") !== REPO);
+  const repoReal = canon(REPO);
+  const foreign = skills.filter((c) => canon(c.sourceInfo?.baseDir) !== repoReal);
   const problems = [];
   if (stderr) problems.push(`stderr not empty: ${stderr.split("\n")[0].slice(0, 120)}`);
   if (!skills.length) problems.push("no skills discovered");
