@@ -76,6 +76,10 @@ export function managedLinks() {
     ["AGENTS.md", join(HOME, "AGENTS.md")],
     ["AGENTS.md", join(HOME, ".pi/agent/AGENTS.md")],
     ["adapters/claude-code/CLAUDE.md", join(HOME, ".claude/CLAUDE.md")],
+    // Codex reads AGENTS.md natively, so this is the shared file itself, not a
+    // compatibility entry. It also reads .agents/skills directly, which is why
+    // its skills need no projection at all.
+    ["AGENTS.md", join(HOME, ".codex/AGENTS.md")],
     ["adapters/pi/settings.json", join(HOME, ".pi/agent/settings.json")],
   ];
   const fileDirs = [

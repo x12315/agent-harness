@@ -52,19 +52,25 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `adapters/pi/agents/*.md`                 | `~/.pi/agent/agents/*.md`     | pi 的 subagent 定义发现位              |
 | `adapters/pi/settings.json`                | `~/.pi/agent/settings.json`   | pi 的 packages 声明要入库，产物（`npm/`、`git/`）不入库 |
 | `adapters/claude-code/CLAUDE.md`           | `~/.claude/CLAUDE.md`         | Claude Code 只读 `CLAUDE.md`，入口文件导入 AGENTS.md |
-| `skills/<name>/`                          | `~/.claude/skills/<name>`     | 该 harness 不读 `.agents/`，由 `skills` CLI 建软链 |
-| `skills/`                                 | —（无需投影）                 | pi 原生扫描 `~/.agents/skills/`        |
+| `AGENTS.md`                                | `~/.codex/AGENTS.md`          | Codex 读全局 `$CODEX_HOME/AGENTS.md`；原生格式就是 `AGENTS.md`，**无需入口文件** |
+| `skills/<name>/`                          | `~/.claude/skills/<name>`     | 三个 harness 里只有 Claude Code 不读 `.agents/`，由 `skills` CLI 建软链 |
+| `skills/`                                 | —（无需投影）                 | pi 与 Codex 原生扫描 `~/.agents/skills/` |
 
 **投影铁律：投影只能指向本仓库。** 指向上游安装目录（如 pi 的 `examples/`）的
 链接会在升级时断掉，或静默换成新版本内容——那等于把真相源搬到仓库之外。
 
 若某个 harness 有自家的指令文件名，在 `adapters/<name>/` 下放一个**兼容入口
-文件**，再把它投影到该 harness 的位置。目前两个已装 harness 的入口：
+文件**，再把它投影到该 harness 的位置。三个已装 harness 的入口：
 
 | harness | 入口 | 投影 |
 | --- | --- | --- |
 | pi | 无入口文件，直接投影 `AGENTS.md` | `~/.pi/agent/AGENTS.md` |
+| Codex | 无入口文件（原生读 `AGENTS.md`），直接投影 | `~/.codex/AGENTS.md` |
 | Claude Code | `adapters/claude-code/CLAUDE.md`（内容 `@../../AGENTS.md`） | `~/.claude/CLAUDE.md` |
+
+只有 Claude Code 需要入口文件，因为它是三者里唯一不认 `AGENTS.md` 这个文件名的。
+pi 与 Codex 都是直接投影，所以它们的技能也不需要投影——两者都原生扫
+`.agents/skills/`。
 
 **陷阱：`@` 导入按文件的真实路径解析，不是按投影路径。** 所以入口文件被软链出去
 之后，里面的相对路径必须按**仓库内位置**写——`adapters/claude-code/CLAUDE.md`
@@ -159,7 +165,7 @@ node scripts/harness.mjs install   # 官方一条命令：投影 + 复原 + 对�
 
 `install` 是**官方安装入口**，依次做四件事，退出码即结论：
 
-1. `bootstrap --apply` —— 按 `managedLinks()` 写 14 条投影，不用手打 `ln`
+1. `bootstrap --apply` —— 按 `managedLinks()` 写 16 条投影，不用手打 `ln`
 2. `restore --apply` —— 按 lock 复原第三方技能（本机 52 个 → 14 组）
 3. `reconcile` —— 声明 vs 实装，差异必须已登记
 4. `verify` —— pi 发现、Claude 入口、投影、仓库卫生
@@ -382,7 +388,7 @@ node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify [--json]
 | `restore.mjs` | 按来源把 lock 分组，复原第三方技能（本机 52 个 → 14 组）。**默认只打印命令**，`--apply` 才装；默认跳过已在盘上的，`--all` 强制全量 | ✅ |
 | `reconcile.mjs` | 声明 vs 实装，按 `sourceType` 分类。差异必须逐条登记在 `scripts/expected-gaps.json`，否则失败 | ❌ |
 | `drift.mjs` | 把 lock 的 `wellKnownDigest` 与上游 `.well-known/agent-skills/index.json` 逐个比对；上游多出来的技能只报告、不失败 | ✅ |
-| `verify.mjs` | 四项：pi 发现、Claude Code 入口、投影都是指向仓库的软链、仓库卫生 | ✅ |
+| `verify.mjs` | 五项：pi 发现、Claude Code 入口、Codex 入口、投影都是指向仓库的软链、仓库卫生 | ✅ |
 
 退出码：`0` 通过 / `1` 有未登记的差异或检查失败 / `2` 用法或仓库状态错误。
 `verify` 里 harness 没装的检查项**跳过而不失败**（仓库在只装一个 harness 的机器上也要能用）。
@@ -580,9 +586,12 @@ git 仓库根）。策略：
 
 按「可验证到什么程度」如实记录，避免把「全绿」误读成「什么都验过」。
 
-1. **只有 pi 与 Claude Code 是实机验证过的 harness。** codex / gemini / cursor /
-   opencode / zed 等只有「接入新 harness 的模板」，没有任何实测；`verify` 也不会
-   覆盖它们。中立层（`.agents/skills/`）理论上对它们生效，但那是规范推论，不是观测。
+1. **三个 harness 的验证深度不同，别当成一样可信。** pi 是**行为验证**（`pi --mode
+   rpc` 的 `get_commands` 实测技能发现与命令表）；Claude Code 是行为验证，但只在
+   **登录后**才有意义（未登录时 `verify` 如实报 `skip`）；Codex 目前只有**结构化**
+   验证（`$CODEX_HOME/AGENTS.md` 是指向仓库的软链、首标题正确），**没有**跑
+   `codex exec` 做行为验证。“Codex 读到了指令层”是推论，不是观测。gemini / cursor /
+   opencode / zed 等连模板都未接入，`verify` 不覆盖。
 2. **github 源的漂移没有自动检测。** `drift.mjs` 只逐个校验 `well-known` 源（当前
    28 条，比对上游 `index.json` 的 digest）。github 源的 `skillFolderHash` 目前没有
    校验路径，要验只能人工 `diff -rq` 与上游比对。
@@ -611,6 +620,10 @@ git 仓库根）。策略：
 
 ## 已知情况
 
+- **三个 harness 已接入为一等 agent**（2026-09-28）：pi、Claude Code、Codex。
+  Codex 的接入最小——它原生读 `AGENTS.md`（含全局 `$CODEX_HOME/AGENTS.md`）并原生
+  扫 `.agents/skills/`，所以只需一条投影（`AGENTS.md` → `~/.codex/AGENTS.md`），
+  既不要入口文件也不要技能软链。实测 `codex --version` = `0.157.1`。
 - **28 个 `lark-*` 已收编入库**（2026-09-28）：由 `skills` CLI 从飞书 well-known
   端点装入 `~/.agents/skills/`，Claude Code 侧为软链。早先 README 描述的
   「只存在于 lock、磁盘没有」已不成立。注：早先那句“31 个命令含 28 个 lark”与

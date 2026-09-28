@@ -1,6 +1,7 @@
 {
-  "note": "Scripts pin the skills CLI to skillsCli. pi / Claude Code entries are the versions this repo was verified against - upgrades are legitimate, verify.mjs only reports a mismatch.",
+  "note": "Scripts pin the skills CLI to skillsCli. pi / Claude Code / Codex entries are the versions this repo was verified against - upgrades are legitimate, verify.mjs only reports a mismatch.",
   "skillsCli": "1.7.0",
   "piVerifiedWith": "0.84.4",
-  "claudeCodeVerifiedWith": "2.1.220"
+  "claudeCodeVerifiedWith": "2.1.220",
+  "codexVerifiedWith": "0.157.1"
 }

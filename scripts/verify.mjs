@@ -3,8 +3,9 @@
  * Post-change checks. Read-only.
  *   1. pi discovers every skill from this repo and reports no warnings
  *   2. the Claude Code entry still reaches AGENTS.md
- *   3. every managed projection is a symlink pointing into this repo
- *   4. repo hygiene: no committed symlinks, node_modules or secrets
+ *   3. the Codex entry resolves into this repo
+ *   4. every managed projection is a symlink pointing into this repo
+ *   5. repo hygiene: no committed symlinks, node_modules or secrets
  *
  * A check is skipped, not failed, when its harness is not installed - the repo
  * has to stay usable on a machine that only runs one of them.
@@ -13,7 +14,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { HOME, REPO, isSymlink, managedLinks, pins } from "./lib/repo.mjs";
+import { HOME, REPO, isInsideRepo, isSymlink, managedLinks, pins } from "./lib/repo.mjs";
 
 const CLAUDE_PROBE =
   "只回答你在全局指令层文件里看到的第一行标题文本（去掉开头的 # 号与空格）。若你的上下文里没有注入这样的指令文件，只回答 NO。";
@@ -136,6 +137,33 @@ function sweepSymlinks(dir, depth, out) {
   }
 }
 
+function checkCodex() {
+  if (!have("codex")) return { name: "codex entry", status: "skip", detail: "codex not installed" };
+  // Codex reads AGENTS.md natively from $CODEX_HOME and reads .agents/skills
+  // directly, so its entry is a plain symlink with no import indirection to get
+  // wrong. A structural check is therefore enough, and it stays offline on
+  // purpose: spawning an agent CLI to ask it about its own context is how the
+  // claude probe once opened an interactive session instead of answering.
+  const target = join(HOME, ".codex/AGENTS.md");
+  const problems = [];
+  if (!existsSync(target)) {
+    problems.push(`${target}: projection missing; run node scripts/harness.mjs install`);
+  } else if (!isSymlink(target)) {
+    problems.push(`${target}: not a symlink (something rewrote it)`);
+  } else if (!isInsideRepo(target)) {
+    problems.push(`${target}: does not resolve into the repo`);
+  } else {
+    const heading = (readFileSync(join(REPO, "AGENTS.md"), "utf8").split("\n").find((l) => l.startsWith("# ")) ?? "").replace(/^#\s*/, "").trim();
+    if (heading !== "AGENTS.md") problems.push(`repo AGENTS.md first heading is "${heading}", not "AGENTS.md"`);
+  }
+  return {
+    name: "codex entry",
+    status: problems.length ? "fail" : "pass",
+    detail: problems.length ? "codex cannot reach the shared instruction layer" : "AGENTS.md projected into $CODEX_HOME",
+    problems,
+  };
+}
+
 function checkProjections() {
   const problems = [];
   for (const [src, target] of managedLinks()) {
@@ -185,11 +213,15 @@ function versionNotes() {
   if (piVersion && p.piVerifiedWith && piVersion !== p.piVerifiedWith) {
     notes.push(`pi ${piVersion} != verified-with ${p.piVerifiedWith} (extensions depend on its exports; re-run the checks)`);
   }
+  const codexVersion = have("codex") ? spawnSync("codex", ["--version"], { encoding: "utf8" }).stdout.trim().replace(/^codex-cli\s+/, "") : "";
+  if (codexVersion && p.codexVerifiedWith && codexVersion !== p.codexVerifiedWith) {
+    notes.push(`codex ${codexVersion} != verified-with ${p.codexVerifiedWith}`);
+  }
   return notes;
 }
 
 export function run({ json = false } = {}) {
-  const checks = [checkPi(), checkClaude(), checkProjections(), checkHygiene()];
+  const checks = [checkPi(), checkClaude(), checkCodex(), checkProjections(), checkHygiene()];
   const notes = versionNotes();
   const ok = checks.every((c) => c.status !== "fail");
   if (json) {
