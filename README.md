@@ -532,6 +532,21 @@ CLI 争抢所有权。两者不可兼得。
 
 ## 决策记录
 
+### 2026-09-28 · 权限墙曾被当成技术约束，选型被宿主现状绑架
+
+- **事实**：给 alpha 选实验沙盒引擎时，`sudo` 需要密码这一条被当成硬约束，把 Incus、
+  bhatti、E2B runtime、libvirt 系统实例一并从候选里划掉，最后选中的方案其首要优点
+  是「不需要 sudo」。当时没有把「我需要 sudo」这件事提交给人。
+- **代价**：选型被宿主权限现状绑架，而不是被需求绑架。被划掉的方案里就有后来真正
+  采用的那条路：`systemd-vmspawn` 零特权即可起全 VM（`/dev/kvm` 与
+  `/dev/vhost-vsock` 权限都是 666），测试用户不需要任何 root 等价能力。
+- **结论**：权限、凭据、审批属**外部授权**，不是技术约束。撞上它们的动作是把缺口列
+  成清单交给持有人拍板，同时给出零特权等价路径，由人决定方案去留。已升级为
+  `AGENTS.md` 的「决策与授权」。
+- **证据**：`~/Desktop/agent-harness-sandbox`（mkosi + systemd-vmspawn）。它的
+  `docs/decisions.md` 是被否方案的完整记录，`docs/host-prereqs.md` 是零特权路径的
+  前置条件。
+
 ### 2026-09-28 · 声明与实装对齐到零差异
 
 - **`session-handoff` → 装上。** 源 `softaworks/agent-toolkit`，自带 python 脚本
