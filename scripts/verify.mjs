@@ -2,10 +2,9 @@
 /**
  * Post-change checks. Read-only.
  *   1. pi discovers every skill from this repo and reports no warnings
- *   2. the Claude Code entry still reaches AGENTS.md
- *   3. the Codex entry resolves into this repo
- *   4. every managed projection is a symlink pointing into this repo
- *   5. repo hygiene: no committed symlinks, node_modules or secrets
+ *   2. the Codex entry resolves into this repo
+ *   3. every managed projection is a symlink pointing into this repo
+ *   4. repo hygiene: no committed symlinks, node_modules or secrets
  *
  * A check is skipped, not failed, when its harness is not installed - the repo
  * has to stay usable on a machine that only runs one of them.
@@ -15,9 +14,6 @@ import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpat
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HOME, REPO, isInsideRepo, isSymlink, managedLinks, pins } from "./lib/repo.mjs";
-
-const CLAUDE_PROBE =
-  "只回答你在全局指令层文件里看到的第一行标题文本（去掉开头的 # 号与空格）。若你的上下文里没有注入这样的指令文件，只回答 NO。";
 
 /**
  * Compare paths through realpath: a repo under a symlinked prefix (macOS /tmp ->
@@ -92,34 +88,6 @@ function checkPi() {
   };
 }
 
-function checkClaude() {
-  if (!have("claude")) return { name: "claude entry", status: "skip", detail: "claude not installed" };
-  const r = spawnSync("claude", ["-p", CLAUDE_PROBE], { encoding: "utf8", timeout: 120_000 });
-  // A timeout or a signal means the CLI never answered - it may be opening an
-  // interactive session instead of running one-shot. That is "cannot verify",
-  // not "verified broken", so it must skip rather than fail the gate. Same for
-  // an empty answer: the entry path is untested, which is what skip means.
-  // Confirming pass-vs-skip is the reader's job (README 残余风险 5).
-  if (r.error) {
-    const why = r.error.code === "ETIMEDOUT" || r.signal ? "probe timed out without an answer" : String(r.error.message);
-    return { name: "claude entry", status: "skip", detail: `${why}; cannot verify non-interactively` };
-  }
-  const out = (r.stdout ?? "").trim();
-  if (!out) {
-    return { name: "claude entry", status: "skip", detail: "probe produced no output; claude may be opening interactively or not signed in" };
-  }
-  if (/not logged in|please run \/login|invalid api key|unauthorized/i.test(out)) {
-    return { name: "claude entry", status: "skip", detail: "claude is not signed in for this HOME; sign in once, then re-run" };
-  }
-  const ok = out.includes("AGENTS.md");
-  return {
-    name: "claude entry",
-    status: ok ? "pass" : "fail",
-    detail: ok ? "entry reaches AGENTS.md" : `expected AGENTS.md, got: ${out.slice(0, 80)}`,
-    problems: ok ? undefined : ["adapters/claude-code/CLAUDE.md: check the @ path - imports resolve against the file's REAL path"],
-  };
-}
-
 const SWEEP_SKIP = new Set(["npm", "sessions", "cache", "backups", "file-history", "ide", "shell-snapshots", "plugins", "tmp"]);
 
 function sweepSymlinks(dir, depth, out) {
@@ -175,7 +143,9 @@ function checkProjections() {
     if (!(real === REPO || real.startsWith(REPO + "/"))) problems.push(`${target}: points outside the repo -> ${real}`);
   }
   const stray = [];
-  for (const root of [join(HOME, ".pi/agent"), join(HOME, ".claude")]) sweepSymlinks(root, 0, stray);
+  // The claude probe used to open an interactive session instead of answering,
+  // so this check deliberately stays offline: a plain symlink needs no probe.
+  for (const root of [join(HOME, ".pi/agent")]) sweepSymlinks(root, 0, stray);
   for (const s of stray) problems.push(`symlink into an upstream install: ${s}`);
   return {
     name: "projections",
@@ -221,7 +191,7 @@ function versionNotes() {
 }
 
 export function run({ json = false } = {}) {
-  const checks = [checkPi(), checkClaude(), checkCodex(), checkProjections(), checkHygiene()];
+  const checks = [checkPi(), checkCodex(), checkProjections(), checkHygiene()];
   const notes = versionNotes();
   const ok = checks.every((c) => c.status !== "fail");
   if (json) {

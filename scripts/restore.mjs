@@ -48,7 +48,7 @@ export function plan({ includeInstalled = false } = {}) {
 
 export function commands(group, { version } = {}) {
   const cli = `npx --yes skills@${version ?? pins().skillsCli}`;
-  return `${cli} add ${group.source} -g -s ${group.skills.join(" ")} -a zed claude-code -y`;
+  return `${cli} add ${group.source} -g -s ${group.skills.join(" ")} -a zed -y`;
 }
 
 export function run({ apply = false, all = false, json = false } = {}) {
@@ -63,7 +63,11 @@ export function run({ apply = false, all = false, json = false } = {}) {
   const results = [];
   if (apply) {
     for (const group of p.groups) {
-      const argv = ["--yes", `skills@${cliVersion}`, "add", group.source, "-g", "-s", ...group.skills, "-a", "zed", "claude-code", "-y"];
+      // `-a zed` is load-bearing, not cosmetic: Zed is the "universal" target
+      // that makes the skills CLI install into ~/.agents/skills/ instead of a
+      // single harness's private directory. Without it the skills land in a
+      // per-client path and pi/Codex never see them.
+      const argv = ["--yes", `skills@${cliVersion}`, "add", group.source, "-g", "-s", ...group.skills, "-a", "zed", "-y"];
       let r;
       let used = 0;
       while (used < attempts) {

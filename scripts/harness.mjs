@@ -8,7 +8,7 @@
  *   restore     install the declared third-party skills from the lock (plan unless --apply)
  *   reconcile   declaration vs reality, gated by scripts/expected-gaps.json
  *   drift       recorded well-known digests vs the upstream index (network)
- *   verify      pi discovery, claude entry, projection and repo hygiene
+ *   verify      pi discovery, codex entry, projection and repo hygiene
  *   all         bootstrap -> reconcile -> verify   (default)
  *   install     the official one-shot for a new machine:
  *               bootstrap --apply -> restore --apply -> reconcile -> verify

@@ -51,39 +51,28 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `adapters/pi/prompts/*.md`                | `~/.pi/agent/prompts/*.md`    | pi 的 prompt 模板发现位                |
 | `adapters/pi/agents/*.md`                 | `~/.pi/agent/agents/*.md`     | pi 的 subagent 定义发现位              |
 | `adapters/pi/settings.json`                | `~/.pi/agent/settings.json`   | pi 的 packages 声明要入库，产物（`npm/`、`git/`）不入库 |
-| `adapters/claude-code/CLAUDE.md`           | `~/.claude/CLAUDE.md`         | Claude Code 只读 `CLAUDE.md`，入口文件导入 AGENTS.md |
 | `AGENTS.md`                                | `~/.codex/AGENTS.md`          | Codex 读全局 `$CODEX_HOME/AGENTS.md`；原生格式就是 `AGENTS.md`，**无需入口文件** |
-| `skills/<name>/`                          | `~/.claude/skills/<name>`     | 三个 harness 里只有 Claude Code 不读 `.agents/`，由 `skills` CLI 建软链 |
-| `skills/`                                 | —（无需投影）                 | pi 与 Codex 原生扫描 `~/.agents/skills/` |
+| `skills/`                                 | —（无需投影）                 | pi 与 Codex 都原生扫描 `~/.agents/skills/`；只有不读中立路径的 harness 才需要软链，由 `skills` CLI 建 |
 
 **投影铁律：投影只能指向本仓库。** 指向上游安装目录（如 pi 的 `examples/`）的
 链接会在升级时断掉，或静默换成新版本内容——那等于把真相源搬到仓库之外。
 
 若某个 harness 有自家的指令文件名，在 `adapters/<name>/` 下放一个**兼容入口
-文件**，再把它投影到该 harness 的位置。三个已装 harness 的入口：
+文件**，再把它投影到该 harness 的位置。两个已装 harness 的入口：
 
 | harness | 入口 | 投影 |
 | --- | --- | --- |
 | pi | 无入口文件，直接投影 `AGENTS.md` | `~/.pi/agent/AGENTS.md` |
 | Codex | 无入口文件（原生读 `AGENTS.md`），直接投影 | `~/.codex/AGENTS.md` |
-| Claude Code | `adapters/claude-code/CLAUDE.md`（内容 `@../../AGENTS.md`） | `~/.claude/CLAUDE.md` |
 
-只有 Claude Code 需要入口文件，因为它是三者里唯一不认 `AGENTS.md` 这个文件名的。
-pi 与 Codex 都是直接投影，所以它们的技能也不需要投影——两者都原生扫
-`.agents/skills/`。
+**两者都不需要入口文件**，因为 pi 与 Codex 都认 `AGENTS.md` 这个名字，而且都原生
+扫 `.agents/skills/`，所以技能也不需要投影。
 
-**陷阱：`@` 导入按文件的真实路径解析，不是按投影路径。** 所以入口文件被软链出去
-之后，里面的相对路径必须按**仓库内位置**写——`adapters/claude-code/CLAUDE.md`
-里要写 `@../../AGENTS.md`。按投影位置写成 `@../AGENTS.md` 会直接失效。
-
-实测（Claude Code 2.1.220）：软链 + `@../AGENTS.md` → Claude 看不到指令层；
-软链 + `@../../AGENTS.md` → 能原样引出 `AGENTS.md` 的句子。
-
-验证入口是否还通，一句话就行（期望输出 `AGENTS.md`；**别引用正文句子，正文会改**）：
-
-```bash
-claude -p "只回答你在全局指令层文件里看到的第一行标题文本（去掉开头的 # 号与空格）。若你的上下文里没有注入这样的指令文件，只回答 NO。"
-```
+只有碰到不认 `AGENTS.md` 这个名字的 harness，才需要 `adapters/<name>/` 下的兼容
+入口。那时有个坑：**`@` 导入按文件的真实路径解析，不是按投影路径**，所以入口文件
+被软链出去之后，里面的相对路径必须按**仓库内位置**写。（历史上
+`adapters/claude-code/` 就因为把 `@../../AGENTS.md` 写成 `@../AGENTS.md` 而失效过；
+Claude Code 已于 2026-09-28 移出本项目。）
 
 ## 第三方 skill
 
@@ -123,9 +112,10 @@ npx skills list
 | `ancoleman/ai-design-components` | implementing-drag-drop |
 | `DietrichGebert/ponytail` | ponytail |
 
-装到哪里由 `restore.mjs` 的 `-a zed claude-code` 决定：全局落 `~/.agents/skills/`
-（pi 原生读这里），再给不扫 `.agents/` 的 harness 建软链。**没装的 harness 会被
-CLI 自动跳过**（实测 zed 未装，没有创建任何目录）。
+装到哪里由 `restore.mjs` 的 `-a zed` 决定：`zed` 是 CLI 里的 **universal agent**，
+指到它才会让文件落进规范存储 `~/.agents/skills/`（pi 与 Codex 原生读这里），而不是
+某个 harness 的私有目录。**没装的 harness 会被 CLI 自动跳过**（实测 zed 未装，没有
+创建任何目录）。
 
 ### 不要建到 pi 私有路径
 
@@ -168,7 +158,7 @@ node scripts/harness.mjs install   # 官方一条命令：投影 + 复原 + 对�
 1. `bootstrap --apply` —— 按 `managedLinks()` 写 16 条投影，不用手打 `ln`
 2. `restore --apply` —— 按 lock 复原第三方技能（本机 52 个 → 14 组）
 3. `reconcile` —— 声明 vs 实装，差异必须已登记
-4. `verify` —— pi 发现、Claude 入口、投影、仓库卫生
+4. `verify` —— pi 发现、Codex 入口、投影、仓库卫生
 
 只查不改、或只跑其中一步，也随时可以：
 
@@ -258,21 +248,22 @@ npx skills remove <name>     # 删除；不要用交互式全选
 
 ```bash
 npx --yes skills@latest add "https://open.feishu.cn/lark-cli/skills/regular" \
-    -g -s '*' -a zed claude-code -y
+    -g -s '*' -a zed -y
 ```
 
 四个坑，不知道就会装错位置：
 
-1. **必须带一个 universal agent（如 `zed`）** 才能让文件落进规范存储
+1. **必须带一个 universal agent（`-a zed`）** 才能让文件落进规范存储
    `~/.agents/skills/`。`src/agents.ts` 里 `globalSkillsDir` 指向
    `~/.agents/skills` 的只有 `dexto`、`kimi-code-cli`、`loaf`、`sarvam-code`、
-   `warp`、`zed`——它们是“读中立路径”的 agent。只传 `-a claude-code` 时，
-   **base 会变成 `~/.claude/skills/`**，文件复制到那里，`~/.agents/skills/` 一个都
-   没有，pi 也就看不到。正确输出里应出现 `universal: Zed` + `symlink → Claude Code`。
+   `warp`、`zed`——它们是“读中立路径”的 agent。只传某个具体 harness 的私有 agent
+   时，**base 会变成那个 harness 的私有目录**，文件复制到那里，`~/.agents/skills/`
+   一个都没有，pi 与 Codex 也就看不到。正确输出里应出现 `universal: Zed`。
 2. **不要用 `--all` / `-a '*'`**。CLI 把 pi 也当目标
    （`globalSkillsDir: ~/.pi/agent/skills`，且通过 `~/.pi/agent` 存在性自动探测），
    全局安装会在那里重建一整套软链农场——正是 B 里拆掉的旧模型。必须显式列 agent。
-3. **`-a` 是空格分隔多值**（`-a zed claude-code`），不是逗号。
+3. **`-a` 是空格分隔多值**（多个 agent 写成 `-a zed warp`），不是逗号。本仓库只需
+   `zed` 一个。
 4. **`--json` 对 well-known 源不支持**（会直接报错退出，什么都没装）。
 
 `well-known` 源只能由 `skills` CLI 安装——任何只认 git 的管理器都表达不了它们。
@@ -283,7 +274,7 @@ npx --yes skills@latest add "https://open.feishu.cn/lark-cli/skills/regular" \
 源用 `https://skills.sh/api/search?q=<name>` 解析（返回 `owner/repo/skill`）：
 
 ```bash
-npx --yes skills@latest add <owner/repo> -s <skill> -g -a zed claude-code -y
+npx --yes skills@latest add <owner/repo> -s <skill> -g -a zed -y
 ```
 
 **警告：安装是整目录替换，不是合并。** 本地独有的文件会消失。执行前先留快照：
@@ -388,14 +379,14 @@ node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify [--json]
 | `restore.mjs` | 按来源把 lock 分组，复原第三方技能（本机 52 个 → 14 组）。**默认只打印命令**，`--apply` 才装；默认跳过已在盘上的，`--all` 强制全量 | ✅ |
 | `reconcile.mjs` | 声明 vs 实装，按 `sourceType` 分类。差异必须逐条登记在 `scripts/expected-gaps.json`，否则失败 | ❌ |
 | `drift.mjs` | 把 lock 的 `wellKnownDigest` 与上游 `.well-known/agent-skills/index.json` 逐个比对；上游多出来的技能只报告、不失败 | ✅ |
-| `verify.mjs` | 五项：pi 发现、Claude Code 入口、Codex 入口、投影都是指向仓库的软链、仓库卫生 | ✅ |
+| `verify.mjs` | 四项：pi 发现、Codex 入口、投影都是指向仓库的软链、仓库卫生 | ✅ |
 
 退出码：`0` 通过 / `1` 有未登记的差异或检查失败 / `2` 用法或仓库状态错误。
 `verify` 里 harness 没装的检查项**跳过而不失败**（仓库在只装一个 harness 的机器上也要能用）。
 
 **版本钉住**在 `scripts/pinned-versions.json`：`skillsCli` 是脚本与文档统一使用的版本；
-`piVerifiedWith` / `claudeCodeVerifiedWith` 是实测过的版本，pi 版本不匹配时 `verify`
-只提示——升级是合法操作，但扩展依赖它导出的符号。
+`piVerifiedWith` / `codexVerifiedWith` 是实测过的版本，不匹配时 `verify` 只提示
+——升级是合法操作，但 pi 的扩展依赖它导出的符号。
 
 **可选：把对账挂成 pre-commit**（只跑离线且快的 reconcile）：
 
@@ -406,8 +397,8 @@ git config core.hooksPath scripts/git-hooks   # 取消：git config --unset core
 ### 接入新 harness 的模板
 
 1. 查它是否原生读 `.agents/skills/`——是则技能零适配。
-2. 查它的全局指令文件名（pi 读 agent-dir 下的 `AGENTS.md`，Claude Code 读 `CLAUDE.md`）。
-   不同则在 `adapters/<name>/` 放兼容入口，再投影过去。
+2. 查它的全局指令文件名。pi 与 Codex 都直接读 `AGENTS.md`；碰到读别的名字的
+   （如 `CLAUDE.md`、`GEMINI.md`）则在 `adapters/<name>/` 放兼容入口，再投影过去。
 3. 厂商私有资产（extensions / prompts / agents 之类）放 `adapters/<name>/`，原位置留软链。
 4. 在 `scripts/lib/repo.mjs` 的 `managedLinks()` 加一行，投影表也加一行。
 5. 跑 `node scripts/harness.mjs all`。
@@ -586,10 +577,9 @@ git 仓库根）。策略：
 
 按「可验证到什么程度」如实记录，避免把「全绿」误读成「什么都验过」。
 
-1. **三个 harness 的验证深度不同，别当成一样可信。** pi 是**行为验证**（`pi --mode
-   rpc` 的 `get_commands` 实测技能发现与命令表）；Claude Code 是行为验证，但只在
-   **登录后**才有意义（未登录时 `verify` 如实报 `skip`）；Codex 目前只有**结构化**
-   验证（`$CODEX_HOME/AGENTS.md` 是指向仓库的软链、首标题正确），**没有**跑
+1. **两个 harness 的验证深度不同，别当成一样可信。** pi 是**行为验证**（`pi --mode
+   rpc` 的 `get_commands` 实测技能发现与命令表）；Codex 目前只有**结构化**验证
+   （`$CODEX_HOME/AGENTS.md` 是指向仓库的软链、首标题正确），**没有**跑
    `codex exec` 做行为验证。“Codex 读到了指令层”是推论，不是观测。gemini / cursor /
    opencode / zed 等连模板都未接入，`verify` 不覆盖。
 2. **github 源的漂移没有自动检测。** `drift.mjs` 只逐个校验 `well-known` 源（当前
@@ -600,15 +590,15 @@ git 仓库根）。策略：
    导出符号（`BorderedLoader` / `convertToLlm` / `copyToClipboard` /
    `serializeConversation`）或 subagent 扩展的 API，需要人工复核；`verify` 在 pi 版本
    不等于 `pinned-versions.json` 的 `piVerifiedWith` 时只**提示**，不拦。
-   同理，Claude Code 的 `@` 导入按**真实路径**解析是实测出的隐式契约，上游若改行为
-   需要重新实测（探针已内置在 `verify`）。
+   Claude Code 已于 2026-09-28 移出本项目，所以它那条 `@` 导入按**真实路径**解析
+   的隐式契约也不再有人验——将来若重新接入，它是第一个要重新实测的东西。
 4. **`skills` CLI 的行为会漂移。** 脚本钉在 `skillsCli=1.7.0`，但该 CLI：对
    `well-known` 源不支持 `--json`；批量调用会瞬时失败（`restore` 已加 retry）；
    `experimental_install` 只认**项目级** `skills-lock.json`（所以本仓库才需要
    `restore.mjs`）。上游一变，pin 与脚本都要重新实测。
-5. **凭据天然是每台机器各自的。** 新机器必须分别登录 pi 与 Claude Code；`verify`
-   对未登录的 harness 只 `skip` 而不判失败。所以**看到全绿前请确认那两项是 `pass`
-   而不是 `skip`**。
+5. **凭据天然是每台机器各自的。** 新机器必须各自登录 pi 与 Codex；`verify` 对未
+   登录/未就绪的 harness 只 `skip` 而不判失败。所以**看到全绿前请确认那几项是
+   `pass` 而不是 `skip`**。
 6. **项目级技能不在对账范围内。** `<project>/.agents/skills/` 由项目自负（见「项目级
    技能」）。本机有 3 个项目各带一份，属设计如此。
 7. **`skills/` 是「构建产物落在源码树里」。** 隔离靠 `.gitignore` 白名单，忘加白名单
@@ -620,12 +610,18 @@ git 仓库根）。策略：
 
 ## 已知情况
 
-- **三个 harness 已接入为一等 agent**（2026-09-28）：pi、Claude Code、Codex。
-  Codex 的接入最小——它原生读 `AGENTS.md`（含全局 `$CODEX_HOME/AGENTS.md`）并原生
-  扫 `.agents/skills/`，所以只需一条投影（`AGENTS.md` → `~/.codex/AGENTS.md`），
-  既不要入口文件也不要技能软链。实测 `codex --version` = `0.157.1`。
+- **两个 harness 已接入为一等 agent**（2026-09-28）：pi、Codex。Codex 的接入最小
+  ——它原生读 `AGENTS.md`（含全局 `$CODEX_HOME/AGENTS.md`）并原生扫
+  `.agents/skills/`，所以只需一条投影（`AGENTS.md` → `~/.codex/AGENTS.md`），既不要
+  入口文件也不要技能软链。实测 `codex --version` = `0.157.1`。
+- **Claude Code 已移出本项目**（2026-09-28）：入口文件、投影、`verify` 检查与
+  `pinned-versions` 条目全部删除；`restore.mjs` 的 `-a claude-code` 也去掉（**保留
+  `zed`**，它才是让文件落进 `~/.agents/skills/` 的那个）。本机 `~/.claude/CLAUDE.md`
+  与 `~/.claude/skills/` 下的 24 条软链已清理。原因：它唯一的行为验证需要登录，未登录
+  时只能 `skip`——与其留一个永远 `skip` 的检查，不如不要。重新接入照「接入新 harness
+  的模板」走。
 - **28 个 `lark-*` 已收编入库**（2026-09-28）：由 `skills` CLI 从飞书 well-known
-  端点装入 `~/.agents/skills/`，Claude Code 侧为软链。早先 README 描述的
+  端点装入 `~/.agents/skills/`。早先 README 描述的
   「只存在于 lock、磁盘没有」已不成立。注：早先那句“31 个命令含 28 个 lark”与
   “`~/.pi/agent/skills/lark-*` 有 28 个软链”描述的是**另一台机器/另一时刻**的
   状态，本机按 B 的规则不建那套软链。
@@ -656,7 +652,8 @@ git 仓库根）。策略：
   调用（未全局安装）。
 - 不可用（不要假设存在）：`pnpm`、`stow`、`chezmoi`。
 - 默认 shell 为 zsh。
-- 已装 harness：pi 0.84.4、Claude Code 2.1.220（`~/.local/bin/claude`）。
+- 已装 harness：pi 0.87.1、Codex 0.157.1。Claude Code 2.1.274 仍在机器上
+  （`/opt/homebrew/bin/claude`），但已移出本项目。
 - 常用项目根目录：`~/Desktop/`、`~/Documents/`、`~/conductor/repos/`——这些下面有
   带项目级 `.agents/skills/` 的仓库（`rm-relay`、`ielts_writing_helper`、
   `Quickstart`），它们的技能目前不在 lock 里。

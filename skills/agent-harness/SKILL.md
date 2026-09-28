@@ -82,9 +82,12 @@ APM（Microsoft Agent Package Manager）虽然更全，但装不了本机这批�
 ## 为新的 harness 做适配
 
 1. 查它是否遵循 `.agents/skills/` 约定——若是，skill 无需任何适配。
-2. 查它的全局指令文件名（pi 是 `~/.pi/agent/AGENTS.md`，Claude Code 是
-   `CLAUDE.md`，多数工具支持 `AGENTS.md`）。不同则在 `adapters/<name>/` 下建
-   指向 `../../AGENTS.md` 的软链，再投影到它的位置。
+2. 查它的全局指令文件名。pi 与 Codex 都直接读 `AGENTS.md`；碰到读别的名字的
+   （如 `CLAUDE.md`、`GEMINI.md`）则在 `adapters/<name>/` 下放兼容入口，再投影
+   到它的位置。**注意 `@` 导入按文件的真实路径解析**，所以入口里的相对路径要按
+   仓库内位置写，不是按投影位置。
 3. 把该 harness 的私有资产（如 pi 的 extensions）放进 `adapters/<name>/`，
    原位置留绝对路径软链。
-4. 在 `README.md` 的「投影」表格里补一行。
+4. 在 `scripts/lib/repo.mjs` 的 `managedLinks()` 加一行（`extensions/*.ts`、
+   `prompts/*.md`、`agents/*.md` 是通配扫描的，放进去就行），README 的「投影」
+   表格也补一行，然后跑 `node scripts/harness.mjs all`。

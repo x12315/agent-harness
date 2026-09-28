@@ -57,7 +57,7 @@
 node scripts/harness.mjs all
 ```
 
-下面四项是它的展开，手工复核时按同样标准：
+下面两项是它的展开，手工复核时按同样标准：
 
 1. **pi 侧发现正常**
 
@@ -68,16 +68,6 @@ node scripts/harness.mjs all
    要求：stderr 为空；`source=skill` 的每一条 `sourceInfo.baseDir` 都指向本仓库。
    注意输出里会夹杂 goal 扩展的 UI 事件行，按 `"command":"get_commands"` 取那一行。
    tool 是否注册要看 `session.getAllTools()`（`get_commands` 不含 tool）。
-
-2. **Claude Code 入口链路还通**
-
-   ```bash
-   claude -p "只回答你在全局指令层文件里看到的第一行标题文本（去掉开头的 # 号与空格）。若你的上下文里没有注入这样的指令文件，只回答 NO。"
-   ```
-
-   期望输出 `AGENTS.md`。**探针不要引用正文句子**——正文会改，探针就会假报警（已踩过
-   一次）。答不上来就是 `adapters/claude-code/CLAUDE.md` 的 `@` 路径写错了：**`@` 导入按
-   文件真实路径解析**，软链出去之后必须按仓库内位置写。
 
 3. **投影没被实体化**：受管位置应始终是 symlink（有些工具会把它改写成实体文件）。
 
