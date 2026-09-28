@@ -51,7 +51,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `adapters/pi/prompts/*.md`                | `~/.pi/agent/prompts/*.md`    | pi 的 prompt 模板发现位                |
 | `adapters/pi/agents/*.md`                 | `~/.pi/agent/agents/*.md`     | pi 的 subagent 定义发现位              |
 | `adapters/pi/settings.json`                | `~/.pi/agent/settings.json`   | pi 的 packages 声明要入库，产物（`npm/`、`git/`）不入库 |
-| `AGENTS.md`                                | `~/.codex/AGENTS.md`          | Codex 读全局 `$CODEX_HOME/AGENTS.md`；原生格式就是 `AGENTS.md`，**无需入口文件** |
+| `adapters/codex/AGENTS.md`                 | `~/.codex/AGENTS.md`          | Codex 的 `$CODEX_HOME` 指令层是作者自己的长文（12 节），已纳管入库；共享规范经祖先发现 `~/AGENTS.md` 到达 Codex |
 | `skills/`                                 | —（无需投影）                 | pi 与 Codex 都原生扫描 `~/.agents/skills/`；只有不读中立路径的 harness 才需要软链，由 `skills` CLI 建 |
 
 **投影铁律：投影只能指向本仓库。** 指向上游安装目录（如 pi 的 `examples/`）的
@@ -63,10 +63,12 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | harness | 入口 | 投影 |
 | --- | --- | --- |
 | pi | 无入口文件，直接投影 `AGENTS.md` | `~/.pi/agent/AGENTS.md` |
-| Codex | 无入口文件（原生读 `AGENTS.md`），直接投影 | `~/.codex/AGENTS.md` |
+| Codex | `adapters/codex/AGENTS.md`（作者的个人指令层，非入口文件） | `~/.codex/AGENTS.md` |
 
-**两者都不需要入口文件**，因为 pi 与 Codex 都认 `AGENTS.md` 这个名字，而且都原生
-扫 `.agents/skills/`，所以技能也不需要投影。
+**两者都不需要兼容入口文件**：pi 与 Codex 都认 `AGENTS.md` 这个名字，而且都原生扫
+`.agents/skills/`，所以技能也不需要投影。区别在指令层怎么分层——pi 读的是共享
+`AGENTS.md` 本身，Codex 的 `$CODEX_HOME/AGENTS.md` 是作者的个人指令层（已入库为
+`adapters/codex/AGENTS.md`），共享规范经祖先链的 `~/AGENTS.md` 叠加到它上面。
 
 只有碰到不认 `AGENTS.md` 这个名字的 harness，才需要 `adapters/<name>/` 下的兼容
 入口。那时有个坑：**`@` 导入按文件的真实路径解析，不是按投影路径**，所以入口文件
@@ -368,7 +370,7 @@ git push -u origin main
 node scripts/harness.mjs install        # 新机器一条命令：投影 + 复原 + 对账 + 验收
 node scripts/harness.mjs all            # 改完只查：对账 + 验收（不写任何东西）
 node scripts/harness.mjs all --apply    # 只把投影写下去
-node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify [--json]
+node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify|secrets [--json]
 ```
 
 `install` 是唯一需要记住的入口；其余都是它的分解步骤。查清一件事用单项命令。
@@ -380,6 +382,7 @@ node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify [--json]
 | `reconcile.mjs` | 声明 vs 实装，按 `sourceType` 分类。差异必须逐条登记在 `scripts/expected-gaps.json`，否则失败 | ❌ |
 | `drift.mjs` | 把 lock 的 `wellKnownDigest` 与上游 `.well-known/agent-skills/index.json` 逐个比对；上游多出来的技能只报告、不失败 | ✅ |
 | `verify.mjs` | 四项：pi 发现、Codex 入口、投影都是指向仓库的软链、仓库卫生 | ✅ |
+| `secret-scan.mjs` | 扫凭据：默认扫全部受控文件，`--staged` 扫暂存差异（pre-commit 用），`--history` 扫全部提交。命中即失败，且**只打印掩码**，不会二次泄露 | ❌ |
 
 退出码：`0` 通过 / `1` 有未登记的差异或检查失败 / `2` 用法或仓库状态错误。
 `verify` 里 harness 没装的检查项**跳过而不失败**（仓库在只装一个 harness 的机器上也要能用）。
@@ -393,6 +396,20 @@ node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify [--json]
 ```bash
 git config core.hooksPath scripts/git-hooks   # 取消：git config --unset core.hooksPath
 ```
+
+### 凭据不入库
+
+硬规则：任何 key / token / 密码都不进受控文件，也不进 `adapters/`。两种可行做法：
+
+- **macOS 钥匙串**（推荐，本机 `ssh_mcp` 就是这么做的）：启动包装脚本用
+  `security find-generic-password -a <user> -s <service> -w` 取值，只导出到环境变量；
+  脚本 700、不进仓库。
+- **环境变量**：配置里只写变量名，值由 shell 或系统提供。
+
+`secret-scan.mjs` 覆盖常见形态（OpenAI/Anthropic、Tavily、GitHub、Google、xAI、AWS、
+Slack、HuggingFace、私钥块），外加「字段名像凭据且值是长字面量」的启发式。
+pre-commit 跑 `--staged`；`harness.mjs all` 跑受控文件全量。它**只打印掩码**，
+避免自己变成泄露点。
 
 ### 接入新 harness 的模板
 
@@ -622,6 +639,24 @@ git 仓库根）。策略：
    依赖本地纪律。
 9. **`drift` 与 `restore` 需要网络。** 本机对 `github.com:443` 曾多次抖动（演练中
    就遇到 `fetch` / `push` 超时），因此拉取与复原可能要重试。
+
+
+### 2026-09-28 · Codex 指令层纳管（本机）
+
+拉取到「Codex 一等公民」的设计后，本机 `bootstrap` 报了 `conflict` 且 `verify` 失败：
+本机的 `~/.codex/AGENTS.md` **不是**共享 AGENTS.md 的投影，而是作者自己的 9.9KB
+Codex 指令文件（12 节：语言偏好 / 配置与操作安全 / Git 与交付 / …），零仓库特征词。
+
+结论：**把那份个人文件纳管**——内容作为 `adapters/codex/AGENTS.md` 入库，
+`~/.codex/AGENTS.md` 改为指向它的软链。共享规范**不需要**并入或 `@` 导入：
+Codex 自己内嵌的 spec 写着「the AGENTS.md file at the root of the repo and any
+directories from the CWD up to the root are included」——即它会读祖先链上的
+`AGENTS.md`，而 `~/AGENTS.md` 本来就是我们的投影。（这条是从 `codex` 二进制里
+读出来的，不是靠模型探针。）
+
+⚠️ **跨机注意**：`adapters/codex/AGENTS.md` 现在只有一份。另一台机器如果也有自己的
+`~/.codex/AGENTS.md`，拉取后 `bootstrap` 会把它指向本仓库这份 → **先备份并合并**你
+在两边的内容，否则会丢一份。
 
 ## 已知情况
 

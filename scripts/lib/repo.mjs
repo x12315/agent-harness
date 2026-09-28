@@ -76,8 +76,10 @@ export function managedLinks() {
     ["AGENTS.md", join(HOME, "AGENTS.md")],
     ["AGENTS.md", join(HOME, ".pi/agent/AGENTS.md")],
     // Codex reads AGENTS.md natively and reads .agents/skills directly, so it
-    // gets the shared file itself and needs no skill projection at all.
-    ["AGENTS.md", join(HOME, ".codex/AGENTS.md")],
+    // needs no skill projection at all. Its $CODEX_HOME instruction file is the
+    // author's own, versioned in adapters/codex/; the shared rules reach Codex
+    // through ancestor discovery (~/AGENTS.md), see README's projection table.
+    ["adapters/codex/AGENTS.md", join(HOME, ".codex/AGENTS.md")],
     ["adapters/pi/settings.json", join(HOME, ".pi/agent/settings.json")],
   ];
   const fileDirs = [

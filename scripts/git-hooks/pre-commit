@@ -1,7 +1,10 @@
 #!/bin/sh
-# Opt-in pre-commit check: keep the declaration and the disk in agreement.
+# Opt-in pre-commit checks: keep the declaration in agreement with the disk, and
+# keep credentials out of the history.
 # Enable with: git config core.hooksPath scripts/git-hooks
 # Disable with: git config --unset core.hooksPath
-# Offline and fast on purpose - the pi/claude probes belong in `harness.mjs verify`.
+# Offline and fast on purpose - the pi/codex probes belong in `harness.mjs verify`.
+set -e
 root=$(git rev-parse --show-toplevel)
-exec node "$root/scripts/reconcile.mjs"
+node "$root/scripts/reconcile.mjs"
+exec node "$root/scripts/secret-scan.mjs" --staged
