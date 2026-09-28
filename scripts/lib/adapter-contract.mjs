@@ -136,17 +136,35 @@ function resolveDeclaration(dir, specifier) {
   return null;
 }
 
-/** The pi on PATH decides which packages count as installed. */
+/**
+ * The pi on PATH decides which packages count as installed.
+ *
+ * An ancestor walk from the realpath'd bin alone is not enough: Homebrew ships
+ * the package at <prefix>/libexec/lib/node_modules/..., a layout no
+ * node_modules lookup from bin/ can reach, so the walk used to return null on
+ * every Homebrew install and the whole contract check silently reported skip.
+ * Check the known install layouts at each level as well.
+ */
 export function piPackageRoot() {
   const bin = execFileSync("which", ["pi"], { encoding: "utf8" }).trim();
   let dir = dirname(realpathSync(bin));
-  for (let hop = 0; hop < 6; hop += 1) {
+  for (let hop = 0; hop < 8; hop += 1) {
     const manifest = join(dir, "package.json");
     if (existsSync(manifest)) {
       try {
         if (JSON.parse(readFileSync(manifest, "utf8")).name === PI_PACKAGE) return dir;
       } catch {
         /* keep walking up */
+      }
+    }
+    for (const root of ["node_modules", "lib/node_modules", "libexec/lib/node_modules"]) {
+      const candidate = join(dir, root, ...PI_PACKAGE.split("/"));
+      const candidateManifest = join(candidate, "package.json");
+      if (!existsSync(candidateManifest)) continue;
+      try {
+        if (JSON.parse(readFileSync(candidateManifest, "utf8")).name === PI_PACKAGE) return candidate;
+      } catch {
+        /* try the next layout */
       }
     }
     const parent = dirname(dir);
