@@ -51,7 +51,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `adapters/pi/prompts/*.md`                | `~/.pi/agent/prompts/*.md`    | pi 的 prompt 模板发现位                |
 | `adapters/pi/agents/*.md`                 | `~/.pi/agent/agents/*.md`     | pi 的 subagent 定义发现位              |
 | `adapters/pi/settings.json`                | `~/.pi/agent/settings.json`   | pi 的 packages 声明要入库，产物（`npm/`、`git/`）不入库 |
-| `adapters/codex/AGENTS.md`                 | `~/.codex/AGENTS.md`          | Codex 的 `$CODEX_HOME` 指令层是作者自己的长文（12 节），已纳管入库；共享规范经祖先发现 `~/AGENTS.md` 到达 Codex |
+| `adapters/codex/AGENTS.md`                 | `~/.codex/AGENTS.md`          | Codex 只读 `$CODEX_HOME/AGENTS.md`（实测不读 `~/AGENTS.md`，也不支持 `@` 导入）；该文件是作者的个人指令层，顶部有一段**指针**要求先读共享规范 |
 | `skills/`                                 | —（无需投影）                 | pi 与 Codex 都原生扫描 `~/.agents/skills/`；只有不读中立路径的 harness 才需要软链，由 `skills` CLI 建 |
 
 **投影铁律：投影只能指向本仓库。** 指向上游安装目录（如 pi 的 `examples/`）的
@@ -65,10 +65,14 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | pi | 无入口文件，直接投影 `AGENTS.md` | `~/.pi/agent/AGENTS.md` |
 | Codex | `adapters/codex/AGENTS.md`（作者的个人指令层，非入口文件） | `~/.codex/AGENTS.md` |
 
-**两者都不需要兼容入口文件**：pi 与 Codex 都认 `AGENTS.md` 这个名字，而且都原生扫
-`.agents/skills/`，所以技能也不需要投影。区别在指令层怎么分层——pi 读的是共享
-`AGENTS.md` 本身，Codex 的 `$CODEX_HOME/AGENTS.md` 是作者的个人指令层（已入库为
-`adapters/codex/AGENTS.md`），共享规范经祖先链的 `~/AGENTS.md` 叠加到它上面。
+**两者都不需要「兼容入口文件」**（即没有 `CLAUDE.md` 那种换名文件）：pi 与 Codex 都认
+`AGENTS.md` 这个名字，而且都原生扫 `.agents/skills/`，所以技能也不需要投影。区别在指令层：
+
+- **pi**：读共享 `AGENTS.md` 本身（`~/.pi/agent/AGENTS.md` 是它的投影）。
+- **Codex**：只读 `$CODEX_HOME/AGENTS.md`。实测它**不读** `~/AGENTS.md`（祖先发现以
+  git 仓库根为界，`~` 不在仓库里），也**不支持 `@` 导入**（插进去无报错但无效）。
+  所以 `adapters/codex/AGENTS.md` 是作者的个人指令层，顶部放一段**指针**，要求改动本
+  harness 前先读共享规范；指针的有效性有行为验证（见「残余风险」第 10 条）。
 
 只有碰到不认 `AGENTS.md` 这个名字的 harness，才需要 `adapters/<name>/` 下的兼容
 入口。那时有个坑：**`@` 导入按文件的真实路径解析，不是按投影路径**，所以入口文件
@@ -658,12 +662,15 @@ directories from the CWD up to the root are included」——即它会读祖先�
 `~/.codex/AGENTS.md`，拉取后 `bootstrap` 会把它指向本仓库这份 → **先备份并合并**你
 在两边的内容，否则会丢一份。
 
-10. **Codex 只有结构化验证，因为 headless Codex 在本机跑不通。** `codex exec` 会等
-    Codex 的 apps MCP 传输层 `https://chatgpt.com/backend-api/ps/mcp`（ChatGPT-app 那几个
-    MCP 走它），本机实测不可达（`http=000`、12s 超时）→ 会话卡在 `Reconnecting…`。
-    TUI 仍可用，只是有重试噪音；网络恢复或挂上代理后应重跑一次行为验证。所以
-    「Codex 读到了指令层」目前是**结构化**结论（`$CODEX_HOME/AGENTS.md` 是软链 +
-    首标题正确），不是行为观测。
+10. **Codex 的共享规范靠「指针」而非自动注入，且行为验证依赖 `chatgpt.com` 可达。**
+    Codex 只读 `$CODEX_HOME/AGENTS.md`，不读 `~/AGENTS.md`、不支持 `@` 导入（均为实测），
+    所以共享规范通过该文件顶部的**指针**到达：要求改动本 harness 前先读
+    `~/.agents/AGENTS.md` 与 `README.md` 的「特殊操作流程」。
+    行为验证（2026-09-28 实测，20s 完成）：问「改动 `~/.agents` 前必须先读哪两个文件」，
+    Codex 答出 `/Users/montana/.agents/AGENTS.md` 和 `README.md` ✓。
+    注意这依赖模型**服从指针**，不是机制强制；而且 `codex exec` 还要
+    `chatgpt.com/backend-api` 可达（本机曾不可达 → 卡在 `Reconnecting…`，根因是 Clash
+    分流，见「已知情况」）。网络或模型行为变化时应重跑该探针。
 
 ## 已知情况
 

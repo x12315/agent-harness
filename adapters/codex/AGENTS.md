@@ -1,3 +1,13 @@
+## 本机 agent harness（硬性前置）
+
+本机的 skill、指令与 harness 配置以 `~/.agents/` 为唯一真相源。**任何会改动
+`~/.agents/` 或其投影（`~/AGENTS.md`、`~/.pi/agent/**`、`~/.codex/**`）的任务，动手前先读
+`~/.agents/AGENTS.md`（规范层：分层归属、硬规则、改动后必过的验证）与
+`~/.agents/README.md` 的「特殊操作流程」（流程层：投影、对账、回滚、graft）。**
+
+这两份文件的内容不在本上下文里：Codex **不**支持 `@` 导入，也不读 `~` 这一层的 AGENTS.md
+（实测：Codex 只读 `$CODEX_HOME/AGENTS.md`）。所以这里只给路径，按需自行读取。
+
 # AGENTS.md
 
 ## 语言偏好

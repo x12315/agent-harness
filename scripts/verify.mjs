@@ -123,6 +123,18 @@ function checkCodex() {
   } else {
     const heading = (readFileSync(join(REPO, "AGENTS.md"), "utf8").split("\n").find((l) => l.startsWith("# ")) ?? "").replace(/^#\s*/, "").trim();
     if (heading !== "AGENTS.md") problems.push(`repo AGENTS.md first heading is "${heading}", not "AGENTS.md"`);
+    // Codex cannot receive the shared rules automatically: it does not read
+    // ~/AGENTS.md (ancestor discovery stops at the git root, and ~ is not a
+    // repo) and it does not support @ imports. The pointer block in
+    // adapters/codex/AGENTS.md is the only mechanism, so losing it silently
+    // would mean Codex never sees the harness standard. Behavioural verification
+    // of that pointer is recorded in README's residual risks; here it is a cheap
+    // offline guard against the mechanism disappearing.
+    const codexFile = join(REPO, "adapters/codex/AGENTS.md");
+    const pointer = existsSync(codexFile) ? readFileSync(codexFile, "utf8") : "";
+    if (!pointer.includes("本机 agent harness（硬性前置）")) {
+      problems.push("adapters/codex/AGENTS.md lost its pointer to the shared rules; Codex would never see the harness standard");
+    }
   }
   return {
     name: "codex entry",
