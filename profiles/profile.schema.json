@@ -117,12 +117,24 @@
     "piAdapter": {
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "extensions"
+      ],
       "properties": {
         "tools": {
           "$ref": "#/$defs/stringArray"
         },
         "extensions": {
-          "$ref": "#/$defs/stringArray"
+          "allOf": [
+            {
+              "$ref": "#/$defs/stringArray"
+            },
+            {
+              "contains": {
+                "const": "harness-manager"
+              }
+            }
+          ]
         },
         "mcps": {
           "$ref": "#/$defs/stringArray"

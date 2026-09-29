@@ -2,7 +2,9 @@
   "label": "Ask",
   "description": "Read-only questions and code exploration",
   "skills": [],
-  "extensions": [],
+  "extensions": [
+    "harness-manager"
+  ],
   "mcps": [],
   "tools": [
     "read",

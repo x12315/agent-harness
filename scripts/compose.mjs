@@ -106,6 +106,9 @@ function readProfiles(modules) {
     for (const key of ["tools", "extensions", "mcps"]) {
       if (adapters.pi[key] !== undefined) assertStringArray(adapters.pi[key], `${name}.adapters.pi.${key}`);
     }
+    if (!adapters.pi.extensions?.includes("harness-manager")) {
+      throw new Error(`${name}.adapters.pi.extensions: harness-manager is required so the human control plane survives work-profile filtering`);
+    }
     if (adapters.pi.model !== undefined) {
       assertKeys(adapters.pi.model, new Set(["provider", "id", "thinking"]), `${name}.adapters.pi.model`);
       if (!adapters.pi.model.provider || !adapters.pi.model.id) throw new Error(`${name}.adapters.pi.model: provider and id are required`);

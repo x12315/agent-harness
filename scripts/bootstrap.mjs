@@ -55,7 +55,7 @@ export function run({ apply = false, json = false } = {}) {
   }
 
   // Engineering vs personalization. The shared declaration carries only
-  // engineering keys (packages); the machine keeps its own model/provider/theme
+  // engineering keys (packages and adapter resource exclusions); the machine keeps its own model/provider/theme
   // in a real local file. bootstrap merges the engineering keys in and leaves
   // everything else alone, so two machines never overwrite each other's choices.
   const settingsActions = mergeSettings({ apply });

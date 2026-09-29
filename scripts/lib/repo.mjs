@@ -92,6 +92,7 @@ export function classify() {
 /** Every path we manage: [repo-relative source, absolute projection target]. */
 export function managedLinks() {
   const links = [
+    ["bin/harness", join(HOME, ".local/bin/harness")],
     ["AGENTS.md", join(HOME, "AGENTS.md")],
     ["AGENTS.md", join(HOME, ".pi/agent/AGENTS.md")],
     // Codex reads AGENTS.md natively and reads .agents/skills directly, so it

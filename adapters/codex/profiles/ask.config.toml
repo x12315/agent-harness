@@ -54,10 +54,6 @@ path = "~/.agents/skills/grilling/SKILL.md"
 enabled = false
 
 [[skills.config]]
-path = "~/.agents/skills/harness-profile-config/SKILL.md"
-enabled = false
-
-[[skills.config]]
 path = "~/.agents/skills/humanizer-zh/SKILL.md"
 enabled = false
 

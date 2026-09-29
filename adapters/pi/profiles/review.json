@@ -5,7 +5,9 @@
     "ponytail",
     "self-explanatory-code"
   ],
-  "extensions": [],
+  "extensions": [
+    "harness-manager"
+  ],
   "mcps": [],
   "tools": [
     "read",

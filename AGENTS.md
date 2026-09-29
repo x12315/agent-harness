@@ -23,7 +23,7 @@
 <!-- instruction:repository/00-purpose -->
 ## 仓库定位
 
-本仓库是厂商中立的 **Harness Catalog + Composer**：收编并声明 instruction、skill 与 profile，编译为各 harness 的原生配置，再通过 adapter 投射。它不重新实现第三方安装器；恢复操作只委托给声明中指定的官方工具。
+本仓库是厂商中立的 **Harness Control Plane + Catalog + Composer**：通过统一的 `harness` / `/harness` 人类入口管理 instruction、skill、profile、投影与健康状态，编译为各 harness 的原生配置，再通过 adapter 投射。它不重新实现第三方安装器；恢复操作只委托给声明中指定的官方工具。
 
 内容真相、编排声明和适配代码在仓库；第三方安装产物与机器运行状态不入库。
 
@@ -47,7 +47,7 @@
 - `instructions/` 与 `profiles/` 是源码；`AGENTS.md` 和生成的 adapter profile 禁止手改，由 composer 生成。
 - `skills` CLI 是共享 `~/.agents/skills` 中第三方 skill 的唯一安装器；自有 skill 由 git 管理。
 - 声明过且固定版本的 adapter 可以生成自己的 harness 私有运行资源，但不得写入 `~/.agents/skills`，并必须由 `verify` 精确检查。
-- Profile 配置只使用自有 `harness-profile-config` 修改中立源码；不得用 Pi 私有 `profile-config` 修改 adapter 生成物。
+- Harness 管理由独立控制平面 `harness` / `/harness` 完成，不受工作 Profile 的工具权限约束；不得用 Pi 私有 `profile-config` 修改 adapter 生成物。
 - 第三方内容不 vendor 入库；安装是整目录替换，不是合并。
 
 <!-- instruction:repository/20-rules -->
@@ -78,7 +78,7 @@
 仓库内容改动后必须执行：
 
 ```bash
-node scripts/harness.mjs all
+harness doctor
 ```
 
 它必须同时验证：生成物无漂移、依赖声明与磁盘一致、无密钥、Pi/Codex 发现正常、adapter 契约未破坏、投影仍是指向仓库的 symlink、Profile 引用可解析。退出码就是结论。

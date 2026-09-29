@@ -15,7 +15,9 @@
         "find",
         "ls"
       ],
-      "extensions": [],
+      "extensions": [
+        "harness-manager"
+      ],
       "mcps": [],
       "model": {
         "provider": "openai-codex",

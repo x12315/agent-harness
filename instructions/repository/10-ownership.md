@@ -17,5 +17,5 @@
 - `instructions/` 与 `profiles/` 是源码；`AGENTS.md` 和生成的 adapter profile 禁止手改，由 composer 生成。
 - `skills` CLI 是共享 `~/.agents/skills` 中第三方 skill 的唯一安装器；自有 skill 由 git 管理。
 - 声明过且固定版本的 adapter 可以生成自己的 harness 私有运行资源，但不得写入 `~/.agents/skills`，并必须由 `verify` 精确检查。
-- Profile 配置只使用自有 `harness-profile-config` 修改中立源码；不得用 Pi 私有 `profile-config` 修改 adapter 生成物。
+- Harness 管理由独立控制平面 `harness` / `/harness` 完成，不受工作 Profile 的工具权限约束；不得用 Pi 私有 `profile-config` 修改 adapter 生成物。
 - 第三方内容不 vendor 入库；安装是整目录替换，不是合并。

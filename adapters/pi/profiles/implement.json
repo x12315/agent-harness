@@ -14,7 +14,6 @@
     "frontend-design",
     "git-commit",
     "grilling",
-    "harness-profile-config",
     "humanizer-zh",
     "implementing-drag-drop",
     "lark-approval",
@@ -58,6 +57,14 @@
     "using-superpowers",
     "writing-for-agents",
     "writing-plans"
+  ],
+  "extensions": [
+    "bookmark",
+    "handoff",
+    "harness-manager",
+    "pi-goal-x",
+    "pi-web-ui",
+    "subagent"
   ],
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",

@@ -5,8 +5,9 @@
  *   2. pi and Codex discover the shared catalog without warnings
  *   3. adapter imports still match installed Pi exports
  *   4. every managed projection resolves into this repo
- *   5. the pinned profile runtime and cross-harness canary work
- *   6. repo hygiene and settings ownership boundaries hold
+ *   5. the human control plane bypasses the model under a read-only Profile
+ *   6. the pinned profile runtime and cross-harness canary work
+ *   7. repo hygiene and settings ownership boundaries hold
  *
  * A check is skipped, not failed, when its harness is not installed - the repo
  * has to stay usable on a machine that only runs one of them.
@@ -85,9 +86,14 @@ function checkPi() {
   const foreign = skills.filter((c) => canon(c.sourceInfo?.baseDir) !== repoReal && !isAllowedPrivate(c));
   const privateCount = skills.filter(isAllowedPrivate).length;
   const problems = [];
+  const harnessCommands = cmds.filter((c) => c.source === "extension" && c.name === "harness");
   if (stderr) problems.push(`stderr not empty: ${stderr.split("\n")[0].slice(0, 120)}`);
   if (!skills.length) problems.push("no skills discovered");
   if (foreign.length) problems.push(`${foreign.length} skills from outside the repo: ${foreign.slice(0, 3).map((c) => c.name).join(", ")}`);
+  if (harnessCommands.length !== 1) problems.push(`expected one /harness control-plane command, found ${harnessCommands.length}`);
+  else if (![harnessCommands[0].sourceInfo?.path, harnessCommands[0].path].filter(Boolean).map(canon).some((p) => p.startsWith(repoReal + "/"))) {
+    problems.push("/harness control-plane command does not come from the repo");
+  }
   return {
     name: "pi discovery",
     status: problems.length ? "fail" : "pass",
@@ -175,6 +181,29 @@ function checkProjections() {
   };
 }
 
+function checkControlPlane() {
+  const target = join(HOME, ".local/bin/harness");
+  const problems = [];
+  if (!existsSync(target)) problems.push(`${target}: missing; run node scripts/harness.mjs install`);
+  else {
+    const r = spawnSync(target, ["status", "--json"], { encoding: "utf8", timeout: 30_000 });
+    let report;
+    try { report = JSON.parse(r.stdout); } catch { /* reported below */ }
+    if (r.status !== 0 || !report?.ok) problems.push((r.stderr || report?.error || "harness status failed").trim());
+    else if (!Array.isArray(report.profiles) || report.profiles.length === 0) problems.push("harness status returned no profiles");
+  }
+  if (!problems.length && have("pi") && have("pi-profile")) {
+    const canary = spawnSync(process.execPath, [join(REPO, "scripts/control-plane-canary.mjs")], { encoding: "utf8", timeout: 90_000 });
+    if (canary.status !== 0) problems.push((canary.stderr || canary.stdout || "control-plane canary failed").trim());
+  }
+  return {
+    name: "control plane",
+    status: problems.length ? "fail" : "pass",
+    detail: problems.length ? "human management entry is unavailable" : "harness CLI and status report are operational",
+    problems,
+  };
+}
+
 function checkComposition() {
   const r = spawnSync(process.execPath, [join(REPO, "scripts/compose.mjs")], { encoding: "utf8", timeout: 30_000 });
   const detail = `${filesCount(join(REPO, "instructions"), ".md")} instruction modules, ${filesCount(join(REPO, "profiles"), ".json", "profile.schema.json")} profiles`;
@@ -238,8 +267,24 @@ function checkProfileRuntime() {
     }
     const names = (commands ?? []).filter((c) => c.source === "skill").map((c) => c.name).sort();
     const expectedNames = ["skill:ponytail", "skill:profile-config", "skill:self-explanatory-code"];
-    if (r.status !== 0 || (r.stderr ?? "").trim() || JSON.stringify(names) !== JSON.stringify(expectedNames)) {
-      problems.push(`Pi review canary differs: skills=[${names.join(", ")}], stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
+    const harnessCommand = (commands ?? []).filter((c) => c.source === "extension" && c.name === "harness");
+    if (r.status !== 0 || (r.stderr ?? "").trim() || JSON.stringify(names) !== JSON.stringify(expectedNames) || harnessCommand.length !== 1) {
+      problems.push(`Pi review canary differs: skills=[${names.join(", ")}], /harness=${harnessCommand.length}, stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
+    }
+  }
+  if (!problems.length && have("pi")) {
+    const r = spawnSync("pi-profile", ["implement", "--", "--mode", "rpc", "--no-session"], {
+      input: '{"id":"1","type":"get_commands"}\n', encoding: "utf8", timeout: 180_000,
+    });
+    let commands;
+    for (const line of (r.stdout ?? "").split("\n")) {
+      try { const value = JSON.parse(line); if (value.command === "get_commands") commands = value.data?.commands; } catch { /* UI events */ }
+    }
+    const extensionCommands = new Set((commands ?? []).filter((c) => c.source === "extension").map((c) => c.name));
+    const expectedCommands = ["bookmark", "goal", "handoff", "harness", "webui"];
+    const missing = expectedCommands.filter((name) => !extensionCommands.has(name));
+    if (r.status !== 0 || (r.stderr ?? "").trim() || missing.length) {
+      problems.push(`Pi implement canary differs: missing extension commands=[${missing.join(", ")}], stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
     }
   }
   if (!problems.length && have("codex")) {
@@ -339,7 +384,7 @@ function checkSettingsBoundary() {
 }
 
 export function run({ json = false } = {}) {
-  const checks = [checkComposition(), checkPi(), checkCodex(), checkAdapterContract(), checkProjections(), checkProfileRuntime(), checkHygiene(), checkSettingsBoundary()];
+  const checks = [checkComposition(), checkPi(), checkCodex(), checkAdapterContract(), checkProjections(), checkControlPlane(), checkProfileRuntime(), checkHygiene(), checkSettingsBoundary()];
   const notes = observedVersions();
   const ok = checks.every((c) => c.status !== "fail");
   if (json) {

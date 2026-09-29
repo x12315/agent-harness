@@ -1,7 +1,6 @@
 # agent-harness
 
-个人的、厂商中立的 Harness Catalog + Composer。收编 instruction、skill 与 profile，
-编译为 Pi、Codex 等 harness 的原生配置；安装与运行仍委托给各自的官方工具。
+个人的、厂商中立的 Harness Control Plane + Catalog + Composer。用统一的 `harness` / `/harness` 入口管理 instruction、skill、profile、投影和健康状态，编译为 Pi、Codex 等 harness 的原生配置；第三方安装与运行仍委托给各自的官方工具。
 
 ## 为什么是这个形状
 
@@ -25,21 +24,35 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 ├── profiles/              # 跨 harness 的中立 Profile 声明与 schema
 ├── skills/                # Agent Skills 发现路径；自有源码 + 第三方安装产物
 ├── AGENTS.md              # composer 生成的常驻兼容入口，禁止手改
+├── bin/harness            # 人类管理入口，投影到 ~/.local/bin
 ├── .skill-lock.json       # 第三方 skill 声明，可复现
 ├── adapters/
 │   ├── pi/                # Pi 私有资产 + 生成的 profile JSON
 │   └── codex/             # Codex 私有指令 + 生成的 profile TOML
 └── scripts/
     ├── compose.mjs        # 中立目录 → harness 原生配置
+    ├── manage.mjs         # 控制面状态、编辑与启动
     ├── bootstrap.mjs      # 投影与本机 settings 合并
-    └── harness.mjs        # compose / restore / verify 的统一入口
+    └── harness.mjs        # 管理与底层操作的统一路由
 ```
 
 分层原则：**目录负责收编，Profile 负责组合，adapter 负责翻译，官方工具负责安装。**
 `instructions/`、`profiles/` 与自有 skill 不含厂商概念；厂商字段进入
 `profiles[].adapters.<name>` 或 `adapters/<name>/`。
 
-## Harness 编排
+## Harness 管理与编排
+
+管理面与工作 Profile 分离：`harness` 是 shell 入口，Pi 内的 `/harness` 是由人触发的扩展命令；两者不依赖 agent 当前是否有 read/write/bash tools。`ask`、`review`、`implement` 只定义工作会话能力，不能阻断管理面。
+
+```bash
+harness                         # 状态面板
+harness profile list
+harness profile edit review     # 编辑源码并自动 apply + verify
+harness run pi ask
+harness run codex implement
+harness apply
+harness doctor
+```
 
 `AGENTS.md` 不再是手写真相源，而是 instruction catalog 的编译结果：
 
@@ -49,7 +62,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 
 `profiles/*.json` 同时选择 instruction modules、skills、推荐模型和 adapter 资源。
 `compose.mjs` 生成 Pi/Codex 的原生配置；用
-`node scripts/harness.mjs profile [name]` 查看声明层的完整组合。格式与已知上游差异见
+`harness profile show <name>` 查看声明层的完整组合。格式与已知上游差异见
 [`profiles/README.md`](profiles/README.md)。
 
 ## 投影（symlink）
@@ -58,6 +71,7 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 
 | 源                                        | 投影                          | 原因                                   |
 | ----------------------------------------- | ----------------------------- | -------------------------------------- |
+| `bin/harness`                             | `~/.local/bin/harness`        | 独立于工作 Profile 的人类控制面入口    |
 | `AGENTS.md`                               | `~/AGENTS.md`                 | 祖先目录发现，对所有 agent 通用        |
 | `AGENTS.md`                               | `~/.pi/agent/AGENTS.md`       | pi 的全局指令只认 agent-dir 下这条路   |
 | `adapters/pi/extensions/*.ts`             | `~/.pi/agent/extensions/*.ts` | pi 扩展是厂商私有机制（文件级软链）    |
@@ -105,8 +119,8 @@ Claude Code 已于 2026-09-28 移出本项目。）
 官方安装渠道就是本仓库的 `install`：它读 lock、按来源分组、调 `skills` CLI 复原。
 
 ```bash
-node scripts/harness.mjs install     # 新机器：投影 + 复原 + 对账 + 验收
-node scripts/harness.mjs restore     # 只复原（默认只打印命令）
+node scripts/harness.mjs install     # 新机器首次安装并创建 harness 命令
+harness restore                      # 只复原（默认只打印命令）
 npx skills add <source>              # 手动加一个，会更新 lock
 npx skills list
 ```
@@ -186,8 +200,8 @@ node scripts/harness.mjs install   # 官方一条命令：投影 + 复原 + 对�
 只查不改、或只跑其中一步，也随时可以：
 
 ```bash
-node scripts/harness.mjs all         # 只对账 + 验收，不写任何东西
-node scripts/restore.mjs --apply     # 只复原第三方技能
+harness doctor                       # 只对账 + 验收，不写任何东西
+harness restore --apply              # 只复原第三方技能
 ```
 
 第三方生命周期全部委托给官方工具：共享 skill 用固定版本的 `skills` CLI，Pi Profile
@@ -383,19 +397,22 @@ git push -u origin main
 所有检查都在这里：纯 Node 内置模块，零第三方依赖，默认只读，重复执行安全。
 
 ```bash
-node scripts/harness.mjs install          # 新机器：compose + 投影 + 恢复 + 对账 + 验收
-node scripts/harness.mjs all              # 改完只查，不写任何东西
-node scripts/harness.mjs compose --apply  # 重新生成 AGENTS 与 adapter profiles
-node scripts/harness.mjs profile [name]   # Profile 声明层检查面板
-node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify|secrets [--json]
+harness                              # 快速状态面板
+harness profile list|show|edit ...   # Profile 管理
+harness run pi|codex <profile>       # 启动工作会话
+harness apply                        # compose + 投影 + 对账 + 验收
+harness doctor                       # 只读总验收
+harness bootstrap|restore|reconcile|drift|verify|secrets [--json]
 ```
 
-`install` 是唯一需要记住的入口；其余都是它的分解步骤。查清一件事用单项命令。
+新机器在投影尚不存在前执行一次 `node scripts/harness.mjs install`；之后只需记住 `harness`。底层命令仍保留，供自动化和排错使用。
 
 | 脚本 | 做什么 | 网络 |
 | --- | --- | --- |
+| `manage.mjs` | 输出有效 catalog 状态，提供 profile 编辑与 harness 启动动作 | ❌ |
+| `control-plane-canary.mjs` | 在 ask Profile 中执行 `/harness status`，断言零 agent/model turn | ❌ |
 | `compose.mjs` | 验证中立 instruction/Profile，生成 `AGENTS.md`、Pi JSON 与 Codex TOML；默认只查，`--apply` 才写；`inspect` 输出声明组合 | ❌ |
-| `bootstrap.mjs` | 按 `managedLinks()` 投影生成物与 adapter，并合并工程 settings；冲突只报错，绝不删除实体内容 | ❌ |
+| `bootstrap.mjs` | 按 `managedLinks()` 投影管理入口、生成物与 adapter，并合并工程 settings；冲突只报错，绝不删除实体内容 | ❌ |
 | `restore.mjs` | 委托固定版本的 `skills` CLI 与 npm 恢复声明资源；默认只打印计划，`--apply` 才执行 | ✅ |
 | `reconcile.mjs` | skill 声明 vs 实装，未登记差异即失败 | ❌ |
 | `drift.mjs` | 比对 well-known digest 与上游索引 | ✅ |
@@ -436,7 +453,7 @@ pre-commit 跑 `--staged`；`harness.mjs all` 跑受控文件全量。它**只�
    （如 `CLAUDE.md`、`GEMINI.md`）则在 `adapters/<name>/` 放兼容入口，再投影过去。
 3. 厂商私有资产（extensions / prompts / agents 之类）放 `adapters/<name>/`，原位置留软链。
 4. 在 `scripts/lib/repo.mjs` 的 `managedLinks()` 加一行，投影表也加一行。
-5. 跑 `node scripts/harness.mjs all`。
+5. 跑 `harness doctor`。
 ## 收藏（bookmark）
 
 让 pi 里某一次回答既留在原会话里，又能被外部笔记跳转。标签写在原 session
@@ -730,12 +747,15 @@ git 仓库根）。策略：
 引入 `pi-profile-switch@0.11.0` 作为 Pi adapter 的运行时，不 fork。实测确认两个上游差异：
 省略 `skills` 实际会得到零共享技能；Codex 的 skill override 实际要求具体 `SKILL.md`
 路径。composer 用显式 skills 集和可移植 `~/.agents/.../SKILL.md` 路径消除歧义。上游还会
-把 Pi 私有 `profile-config` 强制带入所有 Profile，无法收窄；本仓库改用中立
-`harness-profile-config` 管源码，并提交了上游 opt-out 请求
+把 Pi 私有 `profile-config` 强制带入所有 Profile，无法收窄；本仓库以独立于模型和工作权限的 `harness` / `/harness` 控制面管理中立源码，并提交了上游 opt-out 请求
 [VincentFF/pi-profile-switch#64](https://github.com/VincentFF/pi-profile-switch/issues/64)。
 
 暂不拆独立新项目：中立 schema/编译器目前只有一个使用方；出现第二个仓库或第三个 adapter
 后再提取，避免现在引入发布与版本协调成本。
+
+### 2026-09-29 · 管理面与工作 Profile 分离
+
+把 Profile 配置做成 skill 是错误边界：它会被模型意图路由抢占，还受 ask/review 的工具权限约束，导致“管理 harness”退化成“解释为什么不能写”。现在管理面改为 shell 的 `harness` 与 Pi 的 `/harness`；后者只注册人类 slash command，不注册模型 tool。Profile 只约束工作能力，`pi-profile-switch` 只做 Pi runtime，二者都不再充当管理入口。
 
 ## 已知情况
 
@@ -789,10 +809,7 @@ git 仓库根）。策略：
   `~/.pi/agent/npm/`。它们属于「声明入库、产物不入库」里的产物，所以在
   `adapters/pi/settings.json` 里有声明，仓库里没有文件。收编 24 个 github 技能后
   引入 Profile runtime 前实测为 81 个命令（shared skill 55 + extension 23 + prompt 3）；
-  现在新增自有 `harness-profile-config`；上游私有 `profile-config` 文件仍由固定版本包生成并
-  逐字校验，但 bootstrap 通过每台机器展开后的精确 `-path` 把它从普通 Pi 和编排 Profile
-  中排除。实测为 56 个共享 skill、82 个命令，stderr 为空，所有可见 skill 的 `baseDir`
-  都指向 `~/.agents`。
+  现在新增由人触发的 `/harness` 扩展命令；上游私有 `profile-config` 文件仍由固定版本包生成并逐字校验，但 bootstrap 通过每台机器展开后的精确 `-path` 把它从普通 Pi 中排除。Profile runtime 因上游限制仍会看到它，但 `/harness` 在 skill 展开前处理管理请求。实测为 55 个共享 skill、82 个命令，stderr 为空，所有可见共享 skill 的 `baseDir` 都指向 `~/.agents`。
 
 ### 本机环境事实
 
