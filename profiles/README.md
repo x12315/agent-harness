@@ -27,24 +27,47 @@ instructions/ + profiles/
 
 Profile 名不能是 `default`：这是 `pi-profile-switch` 的内置全量模式。
 
+## 场景预设
+
+Profile 不是简单的读写等级，而是“任务场景 × 模型能力”的起点：
+
+| Profile | 场景 | 默认 Skills / 策略 |
+| --- | --- | --- |
+| `ask` | 快速问答与本地浏览 | 零 Skills，只读工具，标准模型指导 |
+| `research` | 空间探索、网页和知识库调研 | 浏览器及核心知识检索 Skills，Pi 不开放 edit/write，远端操作受 retrieval-only instruction 约束 |
+| `review` | 证据化代码审查 | 代码质量 Skills，只读，较深推理 |
+| `coding` | 日常编码 | Git 工作流、计划执行、可读性和最小实现 Skills，可写工作区 |
+| `implement` | 需要完整 catalog 的复杂任务 | 全部 Skills 和已声明扩展；作为全量逃生口，不是日常默认 |
+
+`profile/model-weak` 会要求小步行动、显式约束和逐项验证；`profile/model-standard` 保留适量计划与验收；强模型模式不增加额外指导。模型能力与具体 provider/model ID 分开配置，不从名称猜测能力。
+
+`research` 为调用浏览器和检索 CLI 保留 Pi `bash`，因此不是操作系统级只读沙箱；Codex 的文件沙箱也不约束远端 API。`profile/research` 明确禁止表单提交、发消息、上传以及本地/远端状态修改。需要执行这些动作时切换到 writable 场景。
+
 ## 管理与运行
 
-管理面不属于任何工作 Profile，也不受它的 tools/sandbox 权限约束：
+管理面不属于任何工作 Profile，也不受它的 tools/sandbox 权限约束。日常配置在 Pi 中使用 `/harness configure <name>`：
+
+- “模型能力指导”选择弱、标准或强；
+- “Skills 开关”按分类显示全部 catalog skill，并支持即时搜索；
+- “执行权限”同步设置只读/调研/实现行为指令、Pi 内置 tools、extension 能力集与 Codex sandbox/approval，避免权限和行为互相矛盾；
+- “推荐模型”分别设置 Pi provider/model 与 Codex model；
+- 保存后自动 compose、投影并运行 doctor，任一步失败都会恢复并复验原配置；新会话立即采用新配置，正在使用同名 Profile 的会话需 `/profile reload`。
 
 ```bash
 harness                              # 状态与下一步
 harness profile list
-harness profile show review
-harness profile edit review          # 编辑中立源码，随后自动生成、投影、验收
+harness profile show research
 harness apply
 harness doctor
 ```
 
-Pi 内使用 `/harness` 打开同一管理面；它是人类触发的 extension command，不向模型注册 tool。工作会话通过控制面启动：
+Pi 的 `tools` 是实时工具严格 allowlist；只读、调研和编码预设因此只选择不会绕过该边界的 extension，全量模式才加载 goal、webui 与 subagent。doctor 会核对实际 extension 来源，并拒绝未声明来源或 allowlist 外的活动工具。`harness profile edit <name>` 与 `/harness edit <name>` 仅作为高级 JSON/排错入口。暂不增加 WebUI：现有规模用 Pi 原生搜索、选择器和表单即可完成，且不会引入常驻服务或第二套状态同步。
+
+Pi 内的 `/harness` 是人类触发的 extension command，不向模型注册 tool。工作会话通过控制面启动：
 
 ```bash
-harness run pi ask
-harness run codex review
+harness run pi research
+harness run codex coding
 ```
 
 Pi 会话中仍可用 `/profile use review` 热切换；`pi-profile` 只是 `harness run pi` 背后的 runtime engine。Codex 仍由原生 `-p` 实现，但用户无需记住 adapter 命令。

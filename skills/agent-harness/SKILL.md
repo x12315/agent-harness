@@ -32,13 +32,13 @@ Profile 必须显式声明 `skills`：`[]` 表示无 skill，`["*"]` 表示全�
 ```bash
 harness                              # 控制面状态
 harness profile list|show <name>     # 查看声明组合
-harness profile edit <name>          # 编辑源码、生成、投影并验证
+harness profile edit <name>          # 高级源码入口；日常配置不用它
 harness apply                        # 应用 catalog
 harness doctor                       # 只读总验收
 harness run <pi|codex> <name>        # 以 Profile 启动工作会话
 ```
 
-Pi 内使用 `/harness` 管理，使用 `/profile` 切换当前工作的能力组合。管理命令由人触发，不注册为模型工具，也不受 ask/review/implement 的工具权限约束。具体格式和上游差异见 `profiles/README.md`。
+Pi 内使用 `/harness` 管理，使用 `/profile` 切换当前工作的能力组合。`/harness configure <name>` 通过模型能力、Skills 搜索开关、跨 Harness 执行权限和推荐模型表单修改 Profile，不要求人直接编辑 JSON。管理命令由人触发，不注册为模型工具，也不受 ask/research/review/coding/implement 的工具权限约束。具体格式和上游差异见 `profiles/README.md`。
 
 ## 新增或修改 Skill
 

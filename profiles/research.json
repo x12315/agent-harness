@@ -1,17 +1,26 @@
 {
   "$schema": "./profile.schema.json",
-  "label": "Ask",
-  "description": "Read-only questions and code exploration",
+  "label": "Research",
+  "description": "Evidence-oriented web and knowledge-space exploration",
   "instructions": [
     "profile/read-only",
+    "profile/research",
     "profile/model-standard",
     "profile/concise"
   ],
-  "skills": [],
+  "skills": [
+    "agent-browser",
+    "lark-base",
+    "lark-doc",
+    "lark-drive",
+    "lark-sheets",
+    "lark-wiki"
+  ],
   "adapters": {
     "pi": {
       "tools": [
         "read",
+        "bash",
         "grep",
         "find",
         "ls"
@@ -30,7 +39,7 @@
       "approval": "never",
       "model": {
         "id": "gpt-5.6-terra",
-        "thinking": "low"
+        "thinking": "medium"
       }
     }
   }

@@ -42,23 +42,26 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 
 ## Harness 管理与编排
 
-管理面与工作 Profile 分离：`harness` 是 shell 入口，Pi 内的 `/harness` 是由人触发的扩展命令；两者不依赖 agent 当前是否有 read/write/bash tools。`ask`、`review`、`implement` 只定义工作会话能力，不能阻断管理面。
+管理面与工作 Profile 分离：`harness` 是 shell 入口，Pi 内的 `/harness` 是由人触发的扩展命令；两者不依赖 agent 当前是否有 read/write/bash tools。`ask`、`research`、`review`、`coding`、`implement` 只定义工作会话能力，不能阻断管理面。
+
+日常配置不需要接触 JSON。在 Pi 中运行 `/harness` → “配置 Profile”，即可用可搜索开关选择 Skills、按模型能力调整指导强度、统一选择 Pi/Codex 执行权限并修改推荐模型；保存时自动生成、投影、验收，失败则恢复。WebUI 暂不引入：当前配置规模用 Pi 原生交互即可覆盖，避免增加服务、端口和第二套状态同步。
 
 ```bash
 harness                         # 状态面板
 harness profile list
-harness profile edit review     # 编辑源码并自动 apply + verify
-harness run pi ask
-harness run codex implement
+harness run pi research
+harness run codex coding
 harness apply
 harness doctor
 ```
+
+`harness profile edit <name>` 仍保留为排错用高级入口，不是日常配置路径。
 
 `AGENTS.md` 不再是手写真相源，而是 instruction catalog 的编译结果：
 
 - `instructions/mandatory/`：不可关闭的安全与授权底线。
 - `instructions/repository/`：在本仓库内始终生效的结构、验证和约定。
-- `instructions/profile/`：由 Profile 选择的只读、审查、实现、表达方式等行为模块。
+- `instructions/profile/`：由 Profile 选择的只读、调研、审查、实现、模型能力指导与表达方式模块。
 
 `profiles/*.json` 同时选择 instruction modules、skills、推荐模型和 adapter 资源。
 `compose.mjs` 生成 Pi/Codex 的原生配置；用
@@ -398,7 +401,7 @@ git push -u origin main
 
 ```bash
 harness                              # 快速状态面板
-harness profile list|show|edit ...   # Profile 管理
+harness profile list|show|edit ...   # 查看；edit 是高级源码入口
 harness run pi|codex <profile>       # 启动工作会话
 harness apply                        # compose + 投影 + 对账 + 验收
 harness doctor                       # 只读总验收
@@ -756,6 +759,10 @@ git 仓库根）。策略：
 ### 2026-09-29 · 管理面与工作 Profile 分离
 
 把 Profile 配置做成 skill 是错误边界：它会被模型意图路由抢占，还受 ask/review 的工具权限约束，导致“管理 harness”退化成“解释为什么不能写”。现在管理面改为 shell 的 `harness` 与 Pi 的 `/harness`；后者只注册人类 slash command，不注册模型 tool。Profile 只约束工作能力，`pi-profile-switch` 只做 Pi runtime，二者都不再充当管理入口。
+
+### 2026-09-29 · 场景预设与人类配置器
+
+Profile 由两个主要维度组成：任务场景决定 instructions、Skills 与执行权限，模型能力决定额外指导强度。预制 `ask`、`research`、`review`、`coding`、`implement` 五个起点；弱模型可增加逐步行动和逐项验证，强模型可移除额外约束。日常微调放在 Pi `/harness configure` 的搜索开关和表单中，原始 JSON 编辑降为高级入口。当前不建 WebUI，等配置规模、跨机器管理或并排比较确实超过 TUI 能力再引入。
 
 ## 已知情况
 

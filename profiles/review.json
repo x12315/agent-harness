@@ -5,6 +5,7 @@
   "instructions": [
     "profile/read-only",
     "profile/review",
+    "profile/model-standard",
     "profile/concise"
   ],
   "skills": [

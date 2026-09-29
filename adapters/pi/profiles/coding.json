@@ -1,0 +1,33 @@
+{
+  "label": "Coding",
+  "description": "Focused implementation with Git workflow and engineering discipline",
+  "skills": [
+    "brainstorming",
+    "executing-plans",
+    "finishing-a-development-branch",
+    "git-commit",
+    "make-repo-contribution",
+    "ponytail",
+    "self-explanatory-code",
+    "using-git-worktrees",
+    "writing-plans"
+  ],
+  "extensions": [
+    "bookmark",
+    "handoff",
+    "harness-manager"
+  ],
+  "mcps": [],
+  "tools": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "instructions": "## Implementation mode\n\nPrefer the smallest coherent change that fully satisfies the request. Read before editing, preserve established interfaces unless change is required, run the closest relevant verification, and do not claim completion while known gaps remain.\n\n## Standard-model guidance\n\nFor multi-step work, form a brief plan before acting. Check important assumptions against files, tools, or primary sources, and run the closest relevant verification before reporting completion. Keep routine steps concise; surface uncertainty, conflicts, and failed checks instead of filling gaps with guesses.\n\n## Concise communication\n\nLead with the conclusion. Report evidence, changed paths, verification, and unresolved risks without narrating routine internal steps."
+}

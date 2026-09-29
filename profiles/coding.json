@@ -1,0 +1,52 @@
+{
+  "$schema": "./profile.schema.json",
+  "label": "Coding",
+  "description": "Focused implementation with Git workflow and engineering discipline",
+  "instructions": [
+    "profile/implementation",
+    "profile/model-standard",
+    "profile/concise"
+  ],
+  "skills": [
+    "brainstorming",
+    "executing-plans",
+    "finishing-a-development-branch",
+    "git-commit",
+    "make-repo-contribution",
+    "ponytail",
+    "self-explanatory-code",
+    "using-git-worktrees",
+    "writing-plans"
+  ],
+  "adapters": {
+    "pi": {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls"
+      ],
+      "extensions": [
+        "bookmark",
+        "handoff",
+        "harness-manager"
+      ],
+      "mcps": [],
+      "model": {
+        "provider": "openai-codex",
+        "id": "gpt-5.5"
+      }
+    },
+    "codex": {
+      "sandbox": "workspace-write",
+      "approval": "on-request",
+      "model": {
+        "id": "gpt-5.6-terra",
+        "thinking": "medium"
+      }
+    }
+  }
+}

@@ -16,8 +16,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { compose } from "./compose.mjs";
 import { checkAdapterContract } from "./lib/adapter-contract.mjs";
 import { ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, PI_PROFILE_CONFIG_SKILL, REPO, SHARED_PI_SETTINGS, engineeringPiSettings, isInsideRepo, isSymlink, managedLinks, pins, readJson } from "./lib/repo.mjs";
+
+const PI_RUNTIME_PROBE = join(REPO, "scripts/probes/pi-runtime.ts");
 
 /**
  * Compare paths through realpath: a repo under a symlinked prefix (macOS /tmp ->
@@ -254,50 +257,162 @@ function checkProfileRuntime() {
     }
   }
 
-  // One cross-harness canary catches syntax-only success that does not produce
-  // the declared runtime: review must expose exactly its selected shared skills
-  // (plus Pi's package-owned configurator) and inject its instruction module.
-  if (!problems.length && have("pi")) {
-    const r = spawnSync("pi-profile", ["review", "--", "--mode", "rpc"], {
-      input: '{"id":"1","type":"get_commands"}\n', encoding: "utf8", timeout: 180_000,
-    });
-    let commands;
-    for (const line of (r.stdout ?? "").split("\n")) {
-      try { const value = JSON.parse(line); if (value.command === "get_commands") commands = value.data?.commands; } catch { /* UI events */ }
-    }
-    const names = (commands ?? []).filter((c) => c.source === "skill").map((c) => c.name).sort();
-    const expectedNames = ["skill:ponytail", "skill:profile-config", "skill:self-explanatory-code"];
-    const harnessCommand = (commands ?? []).filter((c) => c.source === "extension" && c.name === "harness");
-    if (r.status !== 0 || (r.stderr ?? "").trim() || JSON.stringify(names) !== JSON.stringify(expectedNames) || harnessCommand.length !== 1) {
-      problems.push(`Pi review canary differs: skills=[${names.join(", ")}], /harness=${harnessCommand.length}, stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
-    }
+  // Runtime expectations come from the current declarations, not the shipped
+  // presets, so user tuning remains valid while adapter drift is still caught.
+  let catalog;
+  if (!problems.length) {
+    try { catalog = compose(); }
+    catch (error) { problems.push(`cannot load profile catalog: ${error.message}`); }
   }
   if (!problems.length && have("pi")) {
-    const r = spawnSync("pi-profile", ["implement", "--", "--mode", "rpc", "--no-session"], {
-      input: '{"id":"1","type":"get_commands"}\n', encoding: "utf8", timeout: 180_000,
+    const baseRuntime = spawnSync("pi", ["--extension", PI_RUNTIME_PROBE, "--mode", "rpc", "--no-session"], {
+      input: '{"id":"tools","type":"prompt","message":"/harness-runtime-probe"}\n', encoding: "utf8", timeout: 180_000,
     });
-    let commands;
-    for (const line of (r.stdout ?? "").split("\n")) {
-      try { const value = JSON.parse(line); if (value.command === "get_commands") commands = value.data?.commands; } catch { /* UI events */ }
+    let defaultBuiltinTools;
+    for (const line of (baseRuntime.stdout ?? "").split("\n")) {
+      try {
+        const value = JSON.parse(line);
+        if (value.type === "extension_ui_request" && value.method === "notify") {
+          const notice = JSON.parse(value.message);
+          if (Array.isArray(notice.activeTools) && Array.isArray(notice.builtinTools)) {
+            defaultBuiltinTools = notice.activeTools.filter((name) => notice.builtinTools.includes(name)).sort();
+          }
+        }
+      } catch { /* unrelated UI events */ }
     }
-    const extensionCommands = new Set((commands ?? []).filter((c) => c.source === "extension").map((c) => c.name));
-    const expectedCommands = ["bookmark", "goal", "handoff", "harness", "webui"];
-    const missing = expectedCommands.filter((name) => !extensionCommands.has(name));
-    if (r.status !== 0 || (r.stderr ?? "").trim() || missing.length) {
-      problems.push(`Pi implement canary differs: missing extension commands=[${missing.join(", ")}], stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
+    if (baseRuntime.status !== 0 || (baseRuntime.stderr ?? "").trim() || !defaultBuiltinTools) {
+      problems.push(`Pi default tool probe failed: ${(baseRuntime.stderr ?? "").trim().slice(0, 160) || "no tool response"}`);
+    }
+    for (const profile of !problems.length ? [...catalog.profiles.keys()].sort() : []) {
+      const generated = readJson(join(REPO, `adapters/pi/profiles/${profile}.json`));
+      const encodedInstruction = Buffer.from(generated.instructions ?? "", "utf8").toString("base64");
+      const input = [
+        '{"id":"commands","type":"get_commands"}',
+        JSON.stringify({ id: "tools", type: "prompt", message: `/harness-runtime-probe ${encodedInstruction}` }),
+        "",
+      ].join("\n");
+      const r = spawnSync("pi-profile", [profile, "--", "--extension", PI_RUNTIME_PROBE, "--mode", "rpc", "--no-session"], {
+        input, encoding: "utf8", timeout: 180_000,
+      });
+      let commands;
+      let runtimeTools;
+      for (const line of (r.stdout ?? "").split("\n")) {
+        try {
+          const value = JSON.parse(line);
+          if (value.command === "get_commands") commands = value.data?.commands;
+          if (value.type === "extension_ui_request" && value.method === "notify") {
+            const notice = JSON.parse(value.message);
+            if (Array.isArray(notice.activeTools) && Array.isArray(notice.builtinTools)) runtimeTools = notice;
+          }
+        } catch { /* unrelated UI events */ }
+      }
+      const skillCommands = (commands ?? []).filter((c) => c.source === "skill").map((c) => c.name).sort();
+      const expectedSkillCommands = [...(generated.skills ?? []).map((name) => `skill:${name}`), "skill:profile-config"].sort();
+      const runtimeExtensionCommands = (commands ?? []).filter((c) => c.source === "extension");
+      const missingExtensionCommands = runtimeExtensionCommands.some((c) => c.name === "harness") ? [] : ["harness"];
+      const resolvedExtensions = runtimeTools?.resolvedExtensions ?? [];
+      const resolvedExtensionIds = resolvedExtensions.map((extension) => extension.id).sort();
+      const expectedExtensions = [...(generated.extensions ?? [])].sort();
+      const allToolSources = runtimeTools?.toolSources ?? [];
+      const activeToolSources = allToolSources.filter((tool) => (runtimeTools?.activeTools ?? []).includes(tool.name));
+      const commandSources = runtimeExtensionCommands.map((command) => command.sourceInfo ?? {});
+      const loadedRuntimeSources = [...commandSources, ...allToolSources];
+      const activeRuntimeSources = [...commandSources, ...activeToolSources];
+      const sourceMatchesExtension = (source, extension) => source.source === `npm:${extension.id}`
+        || (source.path && extension.entry && canon(source.path) === canon(extension.entry));
+      const missingLoadedExtensions = resolvedExtensions
+        .filter((extension) => !loadedRuntimeSources.some((source) => sourceMatchesExtension(source, extension)))
+        .map((extension) => extension.id);
+      const mcpToolsAllowed = generated.mcps === undefined || generated.mcps.length > 0;
+      const unexpectedRuntimeSources = activeRuntimeSources.filter((source) => source.source !== "builtin"
+        && source.source !== "cli"
+        && source.source !== "inline"
+        && !resolvedExtensions.some((extension) => sourceMatchesExtension(source, extension))
+        && !(mcpToolsAllowed && String(source.source).startsWith("mcp")));
+      const expectedTools = generated.tools ?? defaultBuiltinTools;
+      const activeTools = runtimeTools?.activeTools ?? [];
+      const availableBuiltinTools = runtimeTools?.builtinTools ?? [];
+      const actualBuiltinTools = activeTools.filter((name) => availableBuiltinTools.includes(name)).sort();
+      const expectedBuiltinTools = expectedTools.filter((name) => availableBuiltinTools.includes(name)).sort();
+      const missingConfiguredTools = expectedTools.filter((name) => !activeTools.includes(name));
+      const activeToolAllowlistMismatch = generated.tools !== undefined
+        && JSON.stringify([...activeTools].sort()) !== JSON.stringify([...generated.tools].sort());
+      const unexpectedCustomTools = unexpectedRuntimeSources.map((source) => source.name ?? source.path ?? source.source);
+      const expectedModel = generated.defaultProvider && generated.defaultModel
+        ? { provider: generated.defaultProvider, id: generated.defaultModel }
+        : undefined;
+      const modelMismatch = expectedModel && JSON.stringify(runtimeTools?.model) !== JSON.stringify(expectedModel);
+      const thinkingMismatch = generated.defaultThinkingLevel && runtimeTools?.thinking !== generated.defaultThinkingLevel;
+      if (r.status !== 0
+        || (r.stderr ?? "").trim()
+        || JSON.stringify(skillCommands) !== JSON.stringify(expectedSkillCommands)
+        || missingExtensionCommands.length
+        || JSON.stringify(resolvedExtensionIds) !== JSON.stringify(expectedExtensions)
+        || missingLoadedExtensions.length
+        || JSON.stringify(actualBuiltinTools) !== JSON.stringify(expectedBuiltinTools)
+        || missingConfiguredTools.length
+        || activeToolAllowlistMismatch
+        || unexpectedCustomTools.length
+        || runtimeTools?.instructionPresent !== true
+        || modelMismatch
+        || thinkingMismatch) {
+        problems.push(`Pi ${profile} canary differs: skills=[${skillCommands.join(", ")}], resolved extensions=[${resolvedExtensionIds.join(", ")}], unloaded extensions=[${missingLoadedExtensions.join(", ")}], active tools=[${activeTools.join(", ")}], missing commands=[${missingExtensionCommands.join(", ")}], missing configured tools=[${missingConfiguredTools.join(", ")}], allowlist=${activeToolAllowlistMismatch ? "mismatch" : "ok"}, unexpected custom tools=[${unexpectedCustomTools.join(", ")}], instruction=${runtimeTools?.instructionPresent}, model=${runtimeTools?.model ? `${runtimeTools.model.provider}/${runtimeTools.model.id}` : "missing"}, stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
+        break;
+      }
     }
   }
   if (!problems.length && have("codex")) {
-    const r = spawnSync("codex", ["-p", "review", "debug", "prompt-input", "profile canary"], { encoding: "utf8", timeout: 120_000 });
-    const text = r.stdout ?? "";
-    if (r.status !== 0 || !text.includes("Review mode") || !text.includes("- ponytail:") || !text.includes("- self-explanatory-code:") || text.includes("- agent-browser:")) {
-      problems.push(`Codex review canary differs: ${(r.stderr ?? "").trim().slice(0, 160) || "effective prompt did not match the profile"}`);
+    const modelsResult = spawnSync("codex", ["debug", "models"], { encoding: "utf8", timeout: 120_000 });
+    let codexModels = [];
+    try { codexModels = JSON.parse(modelsResult.stdout ?? "{}").models ?? []; }
+    catch { /* reported below */ }
+    if (modelsResult.status !== 0 || (modelsResult.stderr ?? "").trim() || !codexModels.length) {
+      problems.push(`Codex model catalog unavailable: ${(modelsResult.stderr ?? "").trim().slice(0, 160) || "empty model list"}`);
+    }
+    for (const [profile, declaration] of !problems.length ? [...catalog.profiles.entries()].sort(([a], [b]) => a.localeCompare(b)) : []) {
+      const generated = readJson(join(REPO, `adapters/pi/profiles/${profile}.json`));
+      const expectedSkills = generated.skills ?? [];
+      const excludedSkills = catalog.skillCatalog.filter((name) => !expectedSkills.includes(name));
+      const r = spawnSync("codex", ["-p", profile, "debug", "prompt-input", "profile canary"], { encoding: "utf8", timeout: 120_000 });
+      let text = "";
+      try {
+        text = JSON.parse(r.stdout ?? "[]")
+          .flatMap((message) => message.content ?? [])
+          .map((content) => content.text ?? "")
+          .join("\n");
+      } catch { /* reported as a runtime mismatch below */ }
+      const missingSkills = expectedSkills.filter((name) => !text.includes(`(file: r0/${name}/SKILL.md)`));
+      const missingInstructions = declaration.instructions.filter((id) => !text.includes(catalog.modules.get(id).content));
+      const leakedSkills = excludedSkills.filter((name) => text.includes(`(file: r0/${name}/SKILL.md)`));
+      const sandbox = declaration.adapters.codex.sandbox;
+      const approval = declaration.adapters.codex.approval;
+      const expectedModel = declaration.adapters.codex.model;
+      const discoveredModel = expectedModel ? codexModels.find((model) => model.slug === expectedModel.id) : undefined;
+      const modelMissing = Boolean(expectedModel && !discoveredModel);
+      const reasoningMissing = Boolean(expectedModel?.thinking && discoveredModel
+        && !(discoveredModel.supported_reasoning_levels ?? []).some((level) => level.effort === expectedModel.thinking));
+      const sandboxMissing = sandbox && !text.includes(`sandbox_mode\` is \`${sandbox}\``);
+      const approvalMissing = approval === "never"
+        ? !text.includes("Approval policy is currently never.")
+        : approval === "on-request" && !text.includes("# Escalation Requests");
+      if (r.status !== 0
+        || (r.stderr ?? "").trim()
+        || missingSkills.length
+        || missingInstructions.length
+        || leakedSkills.length
+        || sandboxMissing
+        || approvalMissing
+        || modelMissing
+        || reasoningMissing) {
+        problems.push(`Codex ${profile} canary differs: missing skills=[${missingSkills.join(", ")}], leaked skills=[${leakedSkills.join(", ")}], missing instructions=[${missingInstructions.join(", ")}], sandbox=${sandboxMissing ? "missing" : "ok"}, approval=${approvalMissing ? "missing" : "ok"}, model=${modelMissing ? "missing" : reasoningMissing ? "unsupported reasoning" : "ok"}, stderr=${(r.stderr ?? "").trim().slice(0, 160) || "empty"}`);
+        break;
+      }
     }
   }
   return {
     name: "profile runtime",
     status: problems.length ? "fail" : "pass",
-    detail: `pi-profile-switch ${installed ?? "missing"}; private asset and review canary verified across installed harnesses`,
+    detail: `pi-profile-switch ${installed ?? "missing"}; private asset and scenario canaries verified across installed harnesses`,
     problems,
   };
 }
