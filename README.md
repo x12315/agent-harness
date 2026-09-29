@@ -1,7 +1,7 @@
 # agent-harness
 
-个人的、厂商中立的 agent loop 仓库。让 skill、指令和工具配置可复用、可版本化、
-可跨 harness 迁移。
+个人的、厂商中立的 Harness Catalog + Composer。收编 instruction、skill 与 profile，
+编译为 Pi、Codex 等 harness 的原生配置；安装与运行仍委托给各自的官方工具。
 
 ## 为什么是这个形状
 
@@ -21,22 +21,36 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 
 ```
 ~/.agents/
-├── AGENTS.md              # 通用指令层（中立源）
-├── .skill-lock.json       # 第三方 skill 锁定，可复现
-├── .gitignore             # 屏蔽第三方 skill 安装产物
-├── skills/                # 权威 skill 源。发现路径本身
-│   ├── lark-*/            #   ← 第三方，已 gitignore（由 skills CLI 装入）
-│   ├── agent-harness/     #   ← 自有
-│   ├── book-translation/  #   ← 自有
-│   └── self-explanatory-code/  # ← 自有
-└── adapters/              # harness 差异只写在这里
-    └── pi/
-        ├── settings.json    # pi 的全局配置（含 packages 声明）
-        └── extensions/      # handoff.ts, bookmark.ts
+├── instructions/          # instruction modules：mandatory / repository / profile
+├── profiles/              # 跨 harness 的中立 Profile 声明与 schema
+├── skills/                # Agent Skills 发现路径；自有源码 + 第三方安装产物
+├── AGENTS.md              # composer 生成的常驻兼容入口，禁止手改
+├── .skill-lock.json       # 第三方 skill 声明，可复现
+├── adapters/
+│   ├── pi/                # Pi 私有资产 + 生成的 profile JSON
+│   └── codex/             # Codex 私有指令 + 生成的 profile TOML
+└── scripts/
+    ├── compose.mjs        # 中立目录 → harness 原生配置
+    ├── bootstrap.mjs      # 投影与本机 settings 合并
+    └── harness.mjs        # compose / restore / verify 的统一入口
 ```
 
-分层原则：**内容层通用，适配层隔离。** `skills/` 和 `AGENTS.md` 不含任何
-厂商特有概念；每家的私有差异（如 pi 的 extensions）关在 `adapters/<name>/`。
+分层原则：**目录负责收编，Profile 负责组合，adapter 负责翻译，官方工具负责安装。**
+`instructions/`、`profiles/` 与自有 skill 不含厂商概念；厂商字段进入
+`profiles[].adapters.<name>` 或 `adapters/<name>/`。
+
+## Harness 编排
+
+`AGENTS.md` 不再是手写真相源，而是 instruction catalog 的编译结果：
+
+- `instructions/mandatory/`：不可关闭的安全与授权底线。
+- `instructions/repository/`：在本仓库内始终生效的结构、验证和约定。
+- `instructions/profile/`：由 Profile 选择的只读、审查、实现、表达方式等行为模块。
+
+`profiles/*.json` 同时选择 instruction modules、skills、推荐模型和 adapter 资源。
+`compose.mjs` 生成 Pi/Codex 的原生配置；用
+`node scripts/harness.mjs profile [name]` 查看声明层的完整组合。格式与已知上游差异见
+[`profiles/README.md`](profiles/README.md)。
 
 ## 投影（symlink）
 
@@ -50,9 +64,11 @@ Agent Skills 规范（由 Linux Foundation 下的 Agentic AI Foundation 治理�
 | `adapters/pi/extensions/subagent/*.ts`    | `~/.pi/agent/extensions/subagent/*.ts` | 同上（子目录形式）           |
 | `adapters/pi/prompts/*.md`                | `~/.pi/agent/prompts/*.md`    | pi 的 prompt 模板发现位                |
 | `adapters/pi/agents/*.md`                 | `~/.pi/agent/agents/*.md`     | pi 的 subagent 定义发现位              |
-| `adapters/pi/settings.json`                | —（**不是投影，是合并源**）    | 只放工程键（`packages`）；本机文件由 bootstrap 合并 —— 见「工程与个性化的边界」 |
-| `adapters/codex/AGENTS.md`                 | `~/.codex/AGENTS.md`          | Codex 只读 `$CODEX_HOME/AGENTS.md`（实测不读 `~/AGENTS.md`，也不支持 `@` 导入）；该文件是作者的个人指令层，顶部有一段**指针**要求先读共享规范 |
-| `skills/`                                 | —（无需投影）                 | pi 与 Codex 都原生扫描 `~/.agents/skills/`；只有不读中立路径的 harness 才需要软链，由 `skills` CLI 建 |
+| `adapters/pi/settings.json`                | —（**不是投影，是合并源**）    | `packages` 与 Pi 私有 skill 排除；`{{HOME}}` 由 bootstrap 展开 |
+| `adapters/pi/profiles/`                    | `~/.pi-profile-switch/profiles` | 中立 Profile 编译成 Pi 原生目录；state/instances 仍留本机 |
+| `adapters/codex/AGENTS.md`                 | `~/.codex/AGENTS.md`          | Codex 的个人指令层，顶部指针要求按需读取共享规则 |
+| `adapters/codex/profiles/*.config.toml`    | `~/.codex/*.config.toml`      | Codex 原生 `-p/--profile` 配置 |
+| `skills/`                                  | —（无需投影）                 | Pi 与 Codex 都原生扫描 `~/.agents/skills/` |
 
 **投影铁律：投影只能指向本仓库。** 指向上游安装目录（如 pi 的 `examples/`）的
 链接会在升级时断掉，或静默换成新版本内容——那等于把真相源搬到仓库之外。
@@ -159,12 +175,13 @@ cd ~/.agents
 node scripts/harness.mjs install   # 官方一条命令：投影 + 复原 + 对账 + 验收
 ```
 
-`install` 是**官方安装入口**，依次做四件事，退出码即结论：
+`install` 是**官方安装入口**，依次做五件事，退出码即结论：
 
-1. `bootstrap --apply` —— 按 `managedLinks()` 写 16 条投影，不用手打 `ln`
-2. `restore --apply` —— 按 lock 复原第三方技能（本机 52 个 → 14 组）
-3. `reconcile` —— 声明 vs 实装，差异必须已登记
-4. `verify` —— pi 发现、Codex 入口、投影、仓库卫生
+1. `compose` —— 检查 instruction/Profile 生成物没有漂移
+2. `bootstrap --apply` —— 写受管投影、合并本机 settings
+3. `restore --apply` —— 委托 `skills` CLI 与 npm 恢复声明依赖
+4. `reconcile` —— skill 声明与实装差异必须已登记
+5. `verify` —— 两个 harness、profile runtime、adapter 契约、投影与仓库卫生
 
 只查不改、或只跑其中一步，也随时可以：
 
@@ -173,11 +190,9 @@ node scripts/harness.mjs all         # 只对账 + 验收，不写任何东西
 node scripts/restore.mjs --apply     # 只复原第三方技能
 ```
 
-第三方技能的管理**完全借助 `skills` CLI**（钉在 1.7.0），本仓库不自建格式、
-不自建 registry。`restore` 存在的原因是：`skills` CLI **没有全局的「按 lock 安装」
-命令**——它的 `experimental_install` 只读项目级 `skills-lock.json`。所以这项工作
-由本仓库的脚本补上。**`skills/` 不需要任何投影**（pi 原生扫描
-`~/.agents/skills/`）。
+第三方生命周期全部委托给官方工具：共享 skill 用固定版本的 `skills` CLI，Pi Profile
+运行时用固定版本的 npm 包 `pi-profile-switch`。本仓库不自建 registry，也不接管它们的
+安装目录；`restore` 只把已入库声明翻译成对应安装命令。**`skills/` 不需要任何投影**。
 
 注意 `restore` 存在的原因是：`skills` CLI **没有全局的「按 lock 安装」命令**——它的
 `experimental_install` 只读项目级 `skills-lock.json`。所以这项工作由本仓库的脚本补上。
@@ -196,12 +211,9 @@ node scripts/restore.mjs --apply     # 只复原第三方技能
 3. **`AGENTS.md` 的两条投影会各注入一次**：pi 按 symlink 路径去重（不是
    realpath），所以 cwd 在 `~` 下时同一份指令进提示词两次（约 803B）。保留两条是
    因为 cwd 在 `~` 之外时只有 agent-dir 那条生效。
-4. **`settings.json` 的投影必须确认写入方式**。`pi install` / `pi config` /
-   `lastChangelogVersion` 都会重写这个文件；只有**原地 `writeFileSync`** 才穿得过
-   软链（写进源文件），若是「写临时文件再 rename」就会把软链替换成普通文件，投影
-   静默失效。pi 0.84.4 走的是前者（`dist/core/settings-manager.js` 的
-   `withLock()`，加锁后 `writeFileSync(path, next)`），实测写穿、软链保留。
-   升级 pi 后若有人报「配置改动没进 git」，先查这一条。
+4. **本机 settings 不投影。** `adapters/pi/settings.json` 只是工程键合并源；
+   `~/.pi/agent/settings.json` 必须是实体文件。模型、provider、主题等普通偏好留本机，
+   Profile 推荐模型则在中立 Profile 中单独声明。
 
 ### C. lock 与磁盘对账
 
@@ -371,9 +383,10 @@ git push -u origin main
 所有检查都在这里：纯 Node 内置模块，零第三方依赖，默认只读，重复执行安全。
 
 ```bash
-node scripts/harness.mjs install        # 新机器一条命令：投影 + 复原 + 对账 + 验收
-node scripts/harness.mjs all            # 改完只查：对账 + 验收（不写任何东西）
-node scripts/harness.mjs all --apply    # 只把投影写下去
+node scripts/harness.mjs install          # 新机器：compose + 投影 + 恢复 + 对账 + 验收
+node scripts/harness.mjs all              # 改完只查，不写任何东西
+node scripts/harness.mjs compose --apply  # 重新生成 AGENTS 与 adapter profiles
+node scripts/harness.mjs profile [name]   # Profile 声明层检查面板
 node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify|secrets [--json]
 ```
 
@@ -381,24 +394,22 @@ node scripts/harness.mjs bootstrap|restore|reconcile|drift|verify|secrets [--jso
 
 | 脚本 | 做什么 | 网络 |
 | --- | --- | --- |
-| `bootstrap.mjs` | 按 `managedLinks()` 把仓库投影到 harness 原生位置。默认 dry run，`--apply` 才写；遇到实体文件/目录挡路只报 `conflict`，**绝不删** | ❌ |
-| `restore.mjs` | 按来源把 lock 分组，复原第三方技能（本机 52 个 → 14 组）。**默认只打印命令**，`--apply` 才装；默认跳过已在盘上的，`--all` 强制全量 | ✅ |
-| `reconcile.mjs` | 声明 vs 实装，按 `sourceType` 分类。差异必须逐条登记在 `scripts/expected-gaps.json`，否则失败 | ❌ |
-| `drift.mjs` | 把 lock 的 `wellKnownDigest` 与上游 `.well-known/agent-skills/index.json` 逐个比对；上游多出来的技能只报告、不失败 | ✅ |
-| `verify.mjs` | 五项：pi 发现、Codex 入口、pi 适配层的符号契约、投影都是指向仓库的软链、仓库卫生 | ✅ |
-| `secret-scan.mjs` | 扫凭据：默认扫全部受控文件，`--staged` 扫暂存差异（pre-commit 用），`--history` 扫全部提交。命中即失败，且**只打印掩码**，不会二次泄露 | ❌ |
+| `compose.mjs` | 验证中立 instruction/Profile，生成 `AGENTS.md`、Pi JSON 与 Codex TOML；默认只查，`--apply` 才写；`inspect` 输出声明组合 | ❌ |
+| `bootstrap.mjs` | 按 `managedLinks()` 投影生成物与 adapter，并合并工程 settings；冲突只报错，绝不删除实体内容 | ❌ |
+| `restore.mjs` | 委托固定版本的 `skills` CLI 与 npm 恢复声明资源；默认只打印计划，`--apply` 才执行 | ✅ |
+| `reconcile.mjs` | skill 声明 vs 实装，未登记差异即失败 | ❌ |
+| `drift.mjs` | 比对 well-known digest 与上游索引 | ✅ |
+| `verify.mjs` | composition、Pi/Codex、adapter 契约、投影、Profile runtime、仓库卫生与 settings 边界 | 本机探针 |
+| `secret-scan.mjs` | 扫受控文件、暂存差异或完整历史；只打印掩码 | ❌ |
 
 退出码：`0` 通过 / `1` 有未登记的差异或检查失败 / `2` 用法或仓库状态错误。
 `verify` 里 harness 没装的检查项**跳过而不失败**（仓库在只装一个 harness 的机器上也要能用）。
 
-**版本钉住**在 `scripts/pinned-versions.json`，但只钉一种：`skillsCli` 是脚本真正执行、
-并对齐过其怪癖的 CLI——改它就得重测 `restore.mjs` 里的 workaround。**宿主上装了什么版本
-不钉**：版本是要现场观测的事实，不是该手抄的缓存，所以 `verify` 每次把实测值打在末尾
-（`note pi … , codex-cli …`）。pi 适配层对 pi 内部导出符号的依赖由 `adapter contract`
-探针来守：它读**已安装**包的声明文件，逐个核对适配层 import 的符号还在不在，改名即失败
-并点出符号名。
+`scripts/pinned-versions.json` 只钉**被 restore 委托的依赖工具**：`skillsCli` 与
+`piProfileSwitch`。Pi/Codex 宿主版本仍现场观测，不把某次命令输出手抄成约束；Pi adapter
+对内部导出符号的依赖由 `adapter contract` 探针守住。
 
-**可选：把对账挂成 pre-commit**（只跑离线且快的 reconcile）：
+**可选：把生成漂移、对账和密钥扫描挂成 pre-commit**：
 
 ```bash
 git config core.hooksPath scripts/git-hooks   # 取消：git config --unset core.hooksPath
@@ -700,13 +711,31 @@ git 仓库根）。策略：
 两台机器互相覆盖：仓库里一度是另一台机器的 `qingxian-high` / `gpt-5.6-terra`，而本机
 没有这个 provider，pi 只能回退（实测回退到 `openai-codex/gpt-5.5`）。
 
-改为按边界拆开：仓库只存工程键（`packages`）；本机保留**实体** `settings.json`，
-`bootstrap` 合并、`verify` 强制。本机个性化值按**本机历史**恢复为
-`deepseek` / `deepseek-v4-flash`（见提交 `7082513`）。
+改为按边界拆开：普通 Pi settings 只共享工程键（`packages` 与 adapter 私有资源排除）；本机保留**实体**
+`settings.json`，`bootstrap` 合并、`verify` 强制。本机个性化值按历史恢复为
+`deepseek` / `deepseek-v4-flash`（见提交 `7082513`）。后续引入的 Profile 推荐模型是
+**工作模式声明**，单独版本化在 `profiles/`；它不改写本机普通默认值，命令行/会话选择仍可覆盖。
 
 ⚠️ **另一台机器的后果**：它那里的 `~/.pi/agent/settings.json` 同样是软链，拉取后第一次
 `install` 会把它转成实体文件（工程键来自仓库）。它原来的模型选择
 （`qingxian-high`）会消失——因为该键已不属于工程层——需要在那边**重选一次模型**。
+
+### 2026-09-29 · 从 manager 收窄为 Catalog + Composer
+
+项目不再尝试拥有每个第三方安装器：`skills` CLI、npm、Pi/Codex runtime 继续各管自己的
+生命周期；仓库只收编声明、组合 Profile、生成 adapter 并验证最终状态。`AGENTS.md` 也从
+手写源改成 instruction catalog 的生成入口：mandatory/repository 模块常驻，profile 模块
+随工作模式切换。
+
+引入 `pi-profile-switch@0.11.0` 作为 Pi adapter 的运行时，不 fork。实测确认两个上游差异：
+省略 `skills` 实际会得到零共享技能；Codex 的 skill override 实际要求具体 `SKILL.md`
+路径。composer 用显式 skills 集和可移植 `~/.agents/.../SKILL.md` 路径消除歧义。上游还会
+把 Pi 私有 `profile-config` 强制带入所有 Profile，无法收窄；本仓库改用中立
+`harness-profile-config` 管源码，并提交了上游 opt-out 请求
+[VincentFF/pi-profile-switch#64](https://github.com/VincentFF/pi-profile-switch/issues/64)。
+
+暂不拆独立新项目：中立 schema/编译器目前只有一个使用方；出现第二个仓库或第三个 adapter
+后再提取，避免现在引入发布与版本协调成本。
 
 ## 已知情况
 
@@ -746,23 +775,24 @@ git 仓库根）。策略：
   「只存在于 lock、磁盘没有」已不成立。注：早先那句“31 个命令含 28 个 lark”与
   “`~/.pi/agent/skills/lark-*` 有 28 个软链”描述的是**另一台机器/另一时刻**的
   状态，本机按 B 的规则不建那套软链。
-- **`~/.pi/agent/skills/` 现在没有软链，且不应有**。历史上那里有 28 条指向
-  `~/.agents/skills/lark-*` 的软链（早于本仓库存在），已删除；pi 原生扫描中立
-  路径，并存会让 `verify` 把它们判为「来自仓库之外」。该目录本身保留（pi 的
-  全局技能位，将来放厂商专用技能）。
+- **`~/.pi/agent/skills/` 不放共享 skill。** 历史上的 28 条 `lark-*` 软链已删除；Pi
+  原生扫描中立路径。当前唯一允许的实体是固定版本 `pi-profile-switch` 自动同步的
+  `profile-config`，它是声明过且由固定版本模板逐字比对守住的 Pi 私有生成产物。
 - **`skills/.openclaude/` 已隔离**（2026-09-28）：那是 22 个目录的无主嵌套副本，
   已移到 `/tmp/agents-quarantine/`，详见「决策记录」。`skills/` 下现在只有 `.DS_Store`
   这类 OS 噪声（已 gitignore）。
 - **git 身份来自全局配置**（`montana <2398925789@qq.com>`），仓库里没有
   repo-local 覆盖，与早先 README 的描述不同。
-- `~/.pi/agent/skills/` 是个空目录，保留（pi 原生全局技能位，将来放厂商专用技能）。
-- **`~/.pi/agent/settings.json` 是软链**（2026-09-28）：投影自
-  `adapters/pi/settings.json`，为的是把 pi 包的声明入库。写穿已实测（见 B 的规则 4）。
+- **`~/.pi/agent/settings.json` 是本机实体文件**；`bootstrap` 只把仓库声明的
+  `packages` 合并进去，不覆盖模型、provider、主题等本机普通偏好。
 - **装了 `npm:pi-goal-x` 与 `npm:pi-web-ui`**（2026-09-28）：由 `pi install` 装入
   `~/.pi/agent/npm/`。它们属于「声明入库、产物不入库」里的产物，所以在
   `adapters/pi/settings.json` 里有声明，仓库里没有文件。收编 24 个 github 技能后
-  实测：81 个命令（skill 55 + extension 23 + prompt 3），stderr 为空，skill 的
-  `baseDir` 全部指向 `~/.agents`。
+  引入 Profile runtime 前实测为 81 个命令（shared skill 55 + extension 23 + prompt 3）；
+  现在新增自有 `harness-profile-config`；上游私有 `profile-config` 文件仍由固定版本包生成并
+  逐字校验，但 bootstrap 通过每台机器展开后的精确 `-path` 把它从普通 Pi 和编排 Profile
+  中排除。实测为 56 个共享 skill、82 个命令，stderr 为空，所有可见 skill 的 `baseDir`
+  都指向 `~/.agents`。
 
 ### 本机环境事实
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
  * Post-change checks. Read-only.
- *   1. pi discovers every skill from this repo and reports no warnings
- *   2. the Codex entry resolves into this repo
- *   3. the vendored pi adapter still imports symbols pi actually exports
- *   4. every managed projection is a symlink pointing into this repo
- *   5. repo hygiene: no committed symlinks, node_modules or secrets
+ *   1. instruction/profile outputs match their neutral sources
+ *   2. pi and Codex discover the shared catalog without warnings
+ *   3. adapter imports still match installed Pi exports
+ *   4. every managed projection resolves into this repo
+ *   5. the pinned profile runtime and cross-harness canary work
+ *   6. repo hygiene and settings ownership boundaries hold
  *
  * A check is skipped, not failed, when its harness is not installed - the repo
  * has to stay usable on a machine that only runs one of them.
@@ -15,7 +16,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpat
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { checkAdapterContract } from "./lib/adapter-contract.mjs";
-import { ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, REPO, SHARED_PI_SETTINGS, isInsideRepo, isSymlink, managedLinks, readJson } from "./lib/repo.mjs";
+import { ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, PI_PROFILE_CONFIG_SKILL, REPO, SHARED_PI_SETTINGS, engineeringPiSettings, isInsideRepo, isSymlink, managedLinks, pins, readJson } from "./lib/repo.mjs";
 
 /**
  * Compare paths through realpath: a repo under a symlinked prefix (macOS /tmp ->
@@ -77,7 +78,12 @@ function checkPi() {
   if (!cmds) return { name: "pi discovery", status: "fail", detail: "no get_commands response on stdout" };
   const skills = cmds.filter((c) => c.source === "skill");
   const repoReal = canon(REPO);
-  const foreign = skills.filter((c) => canon(c.sourceInfo?.baseDir) !== repoReal);
+  const privateProfileSkill = canon(join(HOME, ".pi/agent/skills/profile-config"));
+  const privateProfileFile = canon(PI_PROFILE_CONFIG_SKILL);
+  const isAllowedPrivate = (c) => (c.name === "profile-config" || c.name === "skill:profile-config") && [c.sourceInfo?.baseDir, c.sourceInfo?.path]
+    .map(canon).some((p) => p === privateProfileSkill || p === privateProfileFile || p.startsWith(privateProfileSkill + "/"));
+  const foreign = skills.filter((c) => canon(c.sourceInfo?.baseDir) !== repoReal && !isAllowedPrivate(c));
+  const privateCount = skills.filter(isAllowedPrivate).length;
   const problems = [];
   if (stderr) problems.push(`stderr not empty: ${stderr.split("\n")[0].slice(0, 120)}`);
   if (!skills.length) problems.push("no skills discovered");
@@ -85,7 +91,7 @@ function checkPi() {
   return {
     name: "pi discovery",
     status: problems.length ? "fail" : "pass",
-    detail: `${skills.length} skills from the repo, ${cmds.length} commands, stderr ${stderr ? "NOT empty" : "empty"}`,
+    detail: `${skills.length - privateCount} shared skills from the repo${privateCount ? ` + ${privateCount} declared Pi-private skill` : ""}, ${cmds.length} commands, stderr ${stderr ? "NOT empty" : "empty"}`,
     problems,
   };
 }
@@ -169,6 +175,88 @@ function checkProjections() {
   };
 }
 
+function checkComposition() {
+  const r = spawnSync(process.execPath, [join(REPO, "scripts/compose.mjs")], { encoding: "utf8", timeout: 30_000 });
+  const detail = `${filesCount(join(REPO, "instructions"), ".md")} instruction modules, ${filesCount(join(REPO, "profiles"), ".json", "profile.schema.json")} profiles`;
+  return {
+    name: "composition",
+    status: r.status === 0 ? "pass" : "fail",
+    detail: r.status === 0 ? `${detail}; generated adapters are current` : `${detail}; generated artifacts drifted`,
+    problems: r.status === 0 ? [] : [(r.stdout || r.stderr || "compose failed").trim().split("\n").slice(0, 4).join("; ")],
+  };
+}
+
+function filesCount(root, suffix, exclude) {
+  if (!existsSync(root)) return 0;
+  let count = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) count += filesCount(path, suffix, exclude);
+    else if (entry.name.endsWith(suffix) && entry.name !== exclude) count += 1;
+  }
+  return count;
+}
+
+function checkProfileRuntime() {
+  const problems = [];
+  const expected = pins().piProfileSwitch;
+  const npmRoot = spawnSync("npm", ["root", "--global"], { encoding: "utf8" });
+  let packageRoot = "";
+  let installed = null;
+  if (npmRoot.status !== 0) {
+    problems.push("npm unavailable; cannot restore pi-profile-switch");
+  } else {
+    packageRoot = join(npmRoot.stdout.trim(), "pi-profile-switch");
+    try { installed = readJson(join(packageRoot, "package.json")).version; } catch { /* missing */ }
+    if (installed !== expected) problems.push(`pi-profile-switch ${installed ?? "missing"}; declared ${expected} (run node scripts/harness.mjs install)`);
+  }
+  if (!have("pi-profile")) problems.push("pi-profile launcher missing from PATH");
+
+  const nativeSkills = join(HOME, ".pi/agent/skills");
+  if (existsSync(nativeSkills)) {
+    const stray = readdirSync(nativeSkills).filter((name) => !name.startsWith(".") && name !== "profile-config");
+    for (const name of stray) problems.push(`${nativeSkills}/${name}: undeclared Pi-private skill`);
+  }
+  if (existsSync(PI_PROFILE_CONFIG_SKILL)) {
+    const template = join(packageRoot, "skills/profile-config/SKILL.md");
+    if (!existsSync(template)) problems.push("installed pi-profile-switch has no profile-config template");
+    else if (readFileSync(PI_PROFILE_CONFIG_SKILL, "utf8") !== readFileSync(template, "utf8")) {
+      problems.push(`${PI_PROFILE_CONFIG_SKILL}: differs from the declared package template`);
+    }
+  }
+
+  // One cross-harness canary catches syntax-only success that does not produce
+  // the declared runtime: review must expose exactly its selected shared skills
+  // (plus Pi's package-owned configurator) and inject its instruction module.
+  if (!problems.length && have("pi")) {
+    const r = spawnSync("pi-profile", ["review", "--", "--mode", "rpc"], {
+      input: '{"id":"1","type":"get_commands"}\n', encoding: "utf8", timeout: 180_000,
+    });
+    let commands;
+    for (const line of (r.stdout ?? "").split("\n")) {
+      try { const value = JSON.parse(line); if (value.command === "get_commands") commands = value.data?.commands; } catch { /* UI events */ }
+    }
+    const names = (commands ?? []).filter((c) => c.source === "skill").map((c) => c.name).sort();
+    const expectedNames = ["skill:ponytail", "skill:profile-config", "skill:self-explanatory-code"];
+    if (r.status !== 0 || (r.stderr ?? "").trim() || JSON.stringify(names) !== JSON.stringify(expectedNames)) {
+      problems.push(`Pi review canary differs: skills=[${names.join(", ")}], stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
+    }
+  }
+  if (!problems.length && have("codex")) {
+    const r = spawnSync("codex", ["-p", "review", "debug", "prompt-input", "profile canary"], { encoding: "utf8", timeout: 120_000 });
+    const text = r.stdout ?? "";
+    if (r.status !== 0 || !text.includes("Review mode") || !text.includes("- ponytail:") || !text.includes("- self-explanatory-code:") || text.includes("- agent-browser:")) {
+      problems.push(`Codex review canary differs: ${(r.stderr ?? "").trim().slice(0, 160) || "effective prompt did not match the profile"}`);
+    }
+  }
+  return {
+    name: "profile runtime",
+    status: problems.length ? "fail" : "pass",
+    detail: `pi-profile-switch ${installed ?? "missing"}; private asset and review canary verified across installed harnesses`,
+    problems,
+  };
+}
+
 function checkHygiene() {
   const r = spawnSync("git", ["-C", REPO, "ls-files", "-s"], { encoding: "utf8" });
   if (r.status !== 0) return { name: "repo hygiene", status: "skip", detail: "not a git checkout" };
@@ -209,11 +297,9 @@ function observedVersions() {
 /**
  * The engineering/personalization boundary, enforced mechanically.
  *
- * Engineering (shared, versioned): only the keys in ENGINEERING_SETTING_KEYS -
- * today just `packages`. Personalization (model, provider, thinking level,
- * theme, toggles) is per machine and lives in a real local file, because a
- * symlink into the repo cannot carry per-machine values: two machines would
- * overwrite each other's choices on every pull.
+ * Ordinary Pi settings share only ENGINEERING_SETTING_KEYS (today packages).
+ * Profile-recommended models are separately versioned in profiles/; the local
+ * default model/provider/theme and explicit session overrides remain personal.
  */
 function checkSettingsBoundary() {
   const problems = [];
@@ -227,6 +313,7 @@ function checkSettingsBoundary() {
   if (personalInShared.length) {
     problems.push(`adapters/pi/settings.json carries personalization: ${personalInShared.join(", ")} - it belongs in the machine-local file`);
   }
+  const expectedEngineering = engineeringPiSettings();
   if (!existsSync(LOCAL_PI_SETTINGS)) {
     problems.push(`${LOCAL_PI_SETTINGS}: missing; run node scripts/harness.mjs install`);
   } else if (isSymlink(LOCAL_PI_SETTINGS)) {
@@ -235,7 +322,7 @@ function checkSettingsBoundary() {
     try {
       const local = readJson(LOCAL_PI_SETTINGS);
       for (const key of ENGINEERING_SETTING_KEYS) {
-        if (JSON.stringify(local[key] ?? null) !== JSON.stringify(shared[key] ?? null)) {
+        if (JSON.stringify(local[key] ?? null) !== JSON.stringify(expectedEngineering[key] ?? null)) {
           problems.push(`${LOCAL_PI_SETTINGS}: ${key} differs from the shared declaration; run install to merge`);
         }
       }
@@ -246,13 +333,13 @@ function checkSettingsBoundary() {
   return {
     name: "settings boundary",
     status: problems.length ? "fail" : "pass",
-    detail: `engineering keys (${ENGINEERING_SETTING_KEYS.join(", ")}) shared; model/provider/theme stay machine-local`,
+    detail: `settings share ${ENGINEERING_SETTING_KEYS.join(", ")} (portable paths expanded); profile models are separate`,
     problems,
   };
 }
 
 export function run({ json = false } = {}) {
-  const checks = [checkPi(), checkCodex(), checkAdapterContract(), checkProjections(), checkHygiene(), checkSettingsBoundary()];
+  const checks = [checkComposition(), checkPi(), checkCodex(), checkAdapterContract(), checkProjections(), checkProfileRuntime(), checkHygiene(), checkSettingsBoundary()];
   const notes = observedVersions();
   const ok = checks.every((c) => c.status !== "fail");
   if (json) {

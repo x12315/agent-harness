@@ -1,4 +1,5 @@
 {
-  "note": "skillsCli is the CLI the scripts actually execute and were written against; changing it means re-testing the workarounds in restore.mjs. Installed harness versions are deliberately absent: a version is a fact to observe, not a claim to cache (verify.mjs reports them live), and the pi adapter's coupling to pi's internal exports is gated by the `adapter contract` probe instead of by a version number.",
-  "skillsCli": "1.7.0"
+  "note": "These are delegated dependency tools/assets the catalog restores, not harness versions. Changing either requires re-running its integration probes. Installed harness versions remain live observations; the pi adapter contract is gated by exported symbols.",
+  "skillsCli": "1.7.0",
+  "piProfileSwitch": "0.11.0"
 }

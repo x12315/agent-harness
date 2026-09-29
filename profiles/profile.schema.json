@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/x12315/agent-harness/profiles/profile.schema.json",
+  "title": "Harness Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "label",
+    "description",
+    "instructions",
+    "skills",
+    "adapters"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instructions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9/_-]*$"
+      },
+      "uniqueItems": true
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "adapters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pi",
+        "codex"
+      ],
+      "properties": {
+        "pi": {
+          "$ref": "#/$defs/piAdapter"
+        },
+        "codex": {
+          "$ref": "#/$defs/codexAdapter"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "piModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "id"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "thinking": {
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    "codexModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "thinking": {
+          "enum": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    "piAdapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "extensions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "mcps": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "model": {
+          "$ref": "#/$defs/piModel"
+        }
+      }
+    },
+    "codexAdapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sandbox": {
+          "enum": [
+            "read-only",
+            "workspace-write",
+            "danger-full-access"
+          ]
+        },
+        "approval": {
+          "enum": [
+            "on-request",
+            "never"
+          ]
+        },
+        "model": {
+          "$ref": "#/$defs/codexModel"
+        }
+      }
+    }
+  }
+}

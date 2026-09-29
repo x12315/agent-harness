@@ -1,0 +1,16 @@
+{
+  "label": "Ask",
+  "description": "Read-only questions and code exploration",
+  "skills": [],
+  "extensions": [],
+  "mcps": [],
+  "tools": [
+    "read",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "instructions": "## Read-only mode\n\nInspect, explain, and review without modifying files or running commands that mutate machine or repository state. If the requested outcome requires a write, describe the proposed change and ask the user to switch to a writable profile.\n\n## Concise communication\n\nLead with the conclusion. Report evidence, changed paths, verification, and unresolved risks without narrating routine internal steps."
+}

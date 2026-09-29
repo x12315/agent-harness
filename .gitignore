@@ -6,6 +6,7 @@
 # ─────────────────────────────────────────────────────────────
 /skills/*
 !/skills/agent-harness/
+!/skills/harness-profile-config/
 !/skills/book-translation/
 !/skills/self-explanatory-code/
 

@@ -16,13 +16,26 @@ export const SKILLS_DIR = join(REPO, "skills");
 export const SHARED_PI_SETTINGS = join(REPO, "adapters/pi/settings.json");
 /** Machine-local pi settings: a real file, merged by bootstrap, never a projection. */
 export const LOCAL_PI_SETTINGS = join(HOME, ".pi/agent/settings.json");
-/** Keys that belong to the engineering layer; everything else is personalization. */
-export const ENGINEERING_SETTING_KEYS = ["packages"];
+/** pi-profile-switch keeps declarations separate from its machine-local state/instances. */
+export const PI_PROFILE_SWITCH_ROOT = join(HOME, ".pi-profile-switch");
+export const PI_PROFILE_CONFIG_SKILL = join(HOME, ".pi/agent/skills/profile-config/SKILL.md");
+/** Keys shared through ordinary Pi settings. Profile model defaults live in profiles/. */
+export const ENGINEERING_SETTING_KEYS = ["packages", "skills"];
 export const LOCK_PATH = join(REPO, ".skill-lock.json");
 export const GAPS_PATH = join(REPO, "scripts/expected-gaps.json");
 export const PINS_PATH = join(REPO, "scripts/pinned-versions.json");
 
 export const readJson = (p) => JSON.parse(readFileSync(p, "utf8"));
+/** Expand the one portable machine-path token accepted by adapter settings. */
+export function engineeringPiSettings() {
+  const shared = readJson(SHARED_PI_SETTINGS);
+  const expand = (value) => Array.isArray(value)
+    ? value.map(expand)
+    : typeof value === "string"
+      ? value.replaceAll("{{HOME}}", HOME)
+      : value;
+  return Object.fromEntries(ENGINEERING_SETTING_KEYS.filter((key) => key in shared).map((key) => [key, expand(shared[key])]));
+}
 export const lockSkills = () => readJson(LOCK_PATH).skills ?? {};
 export const pins = () => readJson(PINS_PATH);
 
@@ -86,6 +99,9 @@ export function managedLinks() {
     // author's own, versioned in adapters/codex/; the shared rules reach Codex
     // through ancestor discovery (~/AGENTS.md), see README's projection table.
     ["adapters/codex/AGENTS.md", join(HOME, ".codex/AGENTS.md")],
+    // The catalog is versioned; runtime state and instances stay beside this
+    // projection in ~/.pi-profile-switch and are never pulled into the repo.
+    ["adapters/pi/profiles", join(PI_PROFILE_SWITCH_ROOT, "profiles")],
   ];
   const fileDirs = [
     ["adapters/pi/prompts", join(HOME, ".pi/agent/prompts")],
@@ -96,6 +112,12 @@ export function managedLinks() {
     if (!existsSync(abs)) continue;
     for (const name of readdirSync(abs)) {
       if (name.endsWith(".md")) links.push([`${from}/${name}`, join(toDir, name)]);
+    }
+  }
+  const codexProfiles = join(REPO, "adapters/codex/profiles");
+  if (existsSync(codexProfiles)) {
+    for (const name of readdirSync(codexProfiles)) {
+      if (name.endsWith(".config.toml")) links.push([`adapters/codex/profiles/${name}`, join(HOME, ".codex", name)]);
     }
   }
   const extRoot = join(REPO, "adapters/pi/extensions");

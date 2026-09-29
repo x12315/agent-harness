@@ -1,7 +1,6 @@
 ---
 name: agent-harness
-description: 维护本机 agent loop 仓库（~/.agents/）。当用户要新增或修改 skill、调整跨
-  harness 的指令、为新的 agent 工具做适配、或排查 skill 没被加载时使用。
+description: 维护本机厂商中立的 Harness Catalog + Composer（~/.agents/）。当用户要收编或修改 instruction、skill、profile，适配新的 agent harness，恢复声明依赖，或排查资源未生效时使用。
 license: MIT
 metadata:
   repo: "~/.agents"
@@ -9,85 +8,74 @@ metadata:
 
 # agent-harness 维护
 
-本仓库 `~/.agents/` 是 agent loop 的唯一真相源。改动前读：
+`~/.agents/` 收编中立资源与组合声明，并编译成各 harness 的原生配置。修改前必须读取仓库 `AGENTS.md`；硬规则以它为准。设计理由、特殊流程与本机事实见 `README.md`。
 
-- `AGENTS.md` —— **规范层**：分层归属、硬规则、改动后必过的验证
-- `README.md` —— **流程层**：分层说明、投影表、特殊操作流程 A–G
+## 职责边界
 
-三者与本文件冲突时，以 `AGENTS.md` 为准。
+- 仓库拥有：`instructions/`、`profiles/`、自有 skill、adapter、生成器与依赖声明。
+- 官方工具拥有：第三方 skill/npm 产物、模型认证、会话和 runtime state。
+- `AGENTS.md`、`adapters/pi/profiles/*.json`、`adapters/codex/profiles/*.config.toml` 是生成物，禁止手改。
+- Composer 只编译、投射和检查，不实现 registry 或第三方安装协议。
 
-## 核心约束
+## Instruction 与 Profile
 
-1. **内容层保持厂商中立。** `skills/` 和 `AGENTS.md` 里不出现任何 harness 特有
-   概念。厂商私有的东西一律关进 `adapters/<name>/`。
-2. **只用规范定义的六个 frontmatter 字段**：`name` / `description` /
-   `license` / `compatibility` / `metadata` / `allowed-tools`。厂商扩展字段
-   （如 pi 的 `disable-model-invocation`）放进 `metadata:`，否则别的实现不认。
-3. `name` 必须与所在目录同名——pi 不强制，但其他实现会强制。
+Instruction modules 分三层：
 
-## 新增一个 skill
+- `instructions/mandatory/`：不可关闭的安全与授权边界。
+- `instructions/repository/`：在本仓库工作时常驻。
+- `instructions/profile/`：由 `profiles/*.json` 选择的工作模式增量。
+
+Profile 必须显式声明 `skills`：`[]` 表示无 skill，`["*"]` 表示全部，其他名称/glob 表示白名单。厂商资源进入 `adapters.pi` / `adapters.codex`，不要污染中立 instruction。
+
+```bash
+node scripts/harness.mjs profile [name]   # 查看声明组合
+node scripts/harness.mjs compose          # 检查生成漂移
+node scripts/harness.mjs compose --apply  # 重新生成
+```
+
+Pi 运行时使用 `pi-profile <name>` 与 `/profile`；Codex 使用 `codex -p <name>`。具体格式和上游差异见 `profiles/README.md`。
+
+## 新增或修改 Skill
 
 ```bash
 mkdir -p ~/.agents/skills/<name>
-# 写 SKILL.md，description 要同时说明「做什么」和「何时触发」
+# 写 SKILL.md；description 必须同时说明“做什么”和“何时触发”
 ```
 
-**必须**在同一提交里往 `.gitignore` 加一行 `!/skills/<name>/`。`.gitignore`
-默认忽略 `skills/` 全部内容（第三方安装产物约 5MB，等同 node_modules），只白名单
-放行自有 skill，忘了加白名单会导致文件不被跟踪。
+自有 skill 必须在同一提交里给 `.gitignore` 增加 `!/skills/<name>/`。第三方 skill 只能用固定版本 `skills` CLI 安装并更新 `.skill-lock.json`，内容不提交。不要让其他 manager 拥有 `~/.agents/skills`。
 
-自有 skill 与第三方 skill **同目录**，没有「自有专用路径」。区别只在 git 跟不
-跟踪——白名单就是那条分界线。
+`SKILL.md` 顶层只允许 `name`、`description`、`license`、`compatibility`、`metadata`、`allowed-tools`；`name` 与目录同名，厂商字段放 `metadata:`。
 
-`description` 决定模型是否加载该 skill，写成 "Helps with X" 这种会失效。
+## 恢复与对账
 
-## 第三方依赖
+```bash
+node scripts/harness.mjs install  # 新机器：compose、投影、委托恢复、对账、验收
+node scripts/harness.mjs restore  # 默认只打印官方安装命令
+node scripts/harness.mjs all      # 改动后的只读总验收
+```
 
-skill 目录下的第三方集由 `skills` CLI 管理（`skills add` / `update` / `remove`），
-锁定在 `.skill-lock.json`。**不要把它们 vendor 进仓库**——依赖产物不入库，
-声明入库。
-
-注意 `skills list` 会把自有 skill 也列进它的清单（标为 `Source: local`），
-不要用 `skills remove` 的交互式全选清理。
-
-APM（Microsoft Agent Package Manager）虽然更全，但装不了本机这批第三方 skill
-（它们来自 `well-known` 源，APM 不支持），且默认也写 `.agents/skills/` 会撞目录。
-详见 `README.md` 的「第三方依赖的管理」。
-
-**不要引入任何会「拥有」`.agents/skills/` 的图形管理器**——它会与 `skills` CLI
-争抢所有权。若只要只读检测，用 `skills-manager` CLI 加
-`--skills-root ~/.agents/skills`（状态外置、不污染仓库，但不与 APP 联动）。
-两个模式的取舍见 `README.md`。
-
-## 改动前先看 README 的「特殊操作流程」
-
-那里记了七个有坑的流程：新机器恢复、投影的建立与拆除、lock 与磁盘对账、
-第三方装/更新/删、验证生效、回滚、绕过 clone 的 git graft。
-
-尤要注意对账（lock 是「应装清单」，不等于磁盘现状）和投影规则（禁止反向链、
-`skills/` 不需要投影）。
+`restore` 委托 `skills` CLI 恢复共享 skill，并委托 npm 恢复声明的 adapter runtime。它不拥有安装产物。破坏性操作、graft、回滚与第三方更新步骤见 README“特殊操作流程”。
 
 ## 排错
 
 | 症状 | 检查 |
 | --- | --- |
-| skill 没出现在可用列表 | 目录下是否有**恰好**名为 `SKILL.md` 的文件；`name` 字段是否存在；`description` 是否为空（缺失则不加载） |
-| skill 在 lock 里但列表里没有 | 属于 declared-not-installed。先对账（README 的 C），例：28 个 `lark-*` 只存在于 lock |
-| 启动有重名警告 | 同一个 skill 被多处发现。检查 `~/.pi/agent/skills/` 下的遗留软链与 `~/.agents/skills/` 是否重复 |
-| 改了没生效 | 运行中的 session 需 `/reload` |
-| 要装 `lark-*` 之类 | 只能 `npx skills`（`well-known` 源），git-only 管理器装不了 |
-| 确认 pi 能看到哪些 skill | 看启动诊断，或直接 `/skill:<name>` 强制加载 |
-| `AGENTS.md` 没被读到 | 确认 `~/.pi/agent/AGENTS.md` 软链可解析（从该目录到 `~/.agents/` 要上**两**级） |
+| 生成物漂移 | 修改源码后运行 `harness.mjs compose --apply`，不要修生成文件 |
+| Profile 引用失败 | `harness.mjs profile <name>`；检查 instruction ID、skill 名/glob、模型认证 |
+| Pi Profile 技能数为零 | Profile 必须显式写 `skills`；全量使用 `["*"]` |
+| Codex skill 开关无效 | 生成配置必须引用具体 `~/.agents/skills/<name>/SKILL.md` |
+| skill 没出现 | 确认文件名恰为 `SKILL.md`、frontmatter 完整、运行中会话已 reload |
+| lock 有但磁盘没有 | `harness.mjs reconcile` 后用 `restore --apply` |
+| 启动有重名警告 | 查私有 skill 目录和中立目录是否重复；只允许验证过的 adapter 私有产物 |
+| 投影被实体化 | 移走冲突实体并运行 `harness.mjs bootstrap --apply`；脚本不会替你删除 |
 
-## 为新的 harness 做适配
+## 接入新 Harness
 
-1. 查它是否遵循 `.agents/skills/` 约定——若是，skill 无需任何适配。
-2. 查它的全局指令文件名。pi 与 Codex 都直接读 `AGENTS.md`；碰到读别的名字的
-   （如 `CLAUDE.md`、`GEMINI.md`）则在 `adapters/<name>/` 下放兼容入口，再投影
-   到它的位置。**注意 `@` 导入按文件的真实路径解析**，所以入口里的相对路径要按
-   仓库内位置写，不是按投影位置。
-3. 把该 harness 的私有资产（如 pi 的 extensions）放进 `adapters/<name>/`，
-   原位置留绝对路径软链。
-4. 在 `scripts/lib/repo.mjs` 的 `managedLinks()` 加一行（`extensions/*.ts`、
-   `prompts/*.md`、`agents/*.md` 是通配扫描的，放进去就行），README 的「投影」
-   表格也补一行，然后跑 `node scripts/harness.mjs all`。
+1. 先查它是否原生发现 `.agents/skills/` 和 `AGENTS.md`。
+2. 在 `adapters/<name>/` 内实现薄翻译层；中立 Profile/schema 不加入厂商字段。
+3. 能原生选择 profile 就生成原生配置；否则只提供声明检查，不先造长期 daemon。
+4. 把投影加入 `managedLinks()`，把契约检查加入 `verify`。
+5. 更新 `profiles/README.md` 与 README 投影表。
+6. 运行 `node scripts/harness.mjs all`。
+
+只有当中立 schema/compiler 出现第二个独立仓库使用方时，才将其抽成新项目；不要为潜在复用提前拆仓库。

@@ -6,5 +6,6 @@
 # Offline and fast on purpose - the pi/codex probes belong in `harness.mjs verify`.
 set -e
 root=$(git rev-parse --show-toplevel)
+node "$root/scripts/compose.mjs"
 node "$root/scripts/reconcile.mjs"
 exec node "$root/scripts/secret-scan.mjs" --staged

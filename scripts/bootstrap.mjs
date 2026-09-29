@@ -11,7 +11,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ENGINEERING_SETTING_KEYS, LOCAL_PI_SETTINGS, REPO, SHARED_PI_SETTINGS, managedLinks, pins, relTarget } from "./lib/repo.mjs";
+import { ENGINEERING_SETTING_KEYS, LOCAL_PI_SETTINGS, REPO, engineeringPiSettings, managedLinks, pins, relTarget } from "./lib/repo.mjs";
 
 /**
  * Relative link target computed from the directory's REAL path.
@@ -95,11 +95,7 @@ export function run({ apply = false, json = false } = {}) {
  * Returns the same action records shape as the projection loop.
  */
 export function mergeSettings({ apply = false } = {}) {
-  const shared = JSON.parse(readFileSync(SHARED_PI_SETTINGS, "utf8"));
-  const engineering = {};
-  for (const key of ENGINEERING_SETTING_KEYS) {
-    if (key in shared) engineering[key] = shared[key];
-  }
+  const engineering = engineeringPiSettings();
 
   const legacy = existsSync(LOCAL_PI_SETTINGS) && lstatSync(LOCAL_PI_SETTINGS).isSymbolicLink();
   let personal = {};

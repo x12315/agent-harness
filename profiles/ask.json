@@ -1,0 +1,34 @@
+{
+  "$schema": "./profile.schema.json",
+  "label": "Ask",
+  "description": "Read-only questions and code exploration",
+  "instructions": [
+    "profile/read-only",
+    "profile/concise"
+  ],
+  "skills": [],
+  "adapters": {
+    "pi": {
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls"
+      ],
+      "extensions": [],
+      "mcps": [],
+      "model": {
+        "provider": "openai-codex",
+        "id": "gpt-5.5"
+      }
+    },
+    "codex": {
+      "sandbox": "read-only",
+      "approval": "never",
+      "model": {
+        "id": "gpt-5.6-terra",
+        "thinking": "low"
+      }
+    }
+  }
+}
