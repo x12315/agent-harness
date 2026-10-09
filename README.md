@@ -71,4 +71,8 @@ Web 细节见 [web/README.md](web/README.md)。运行中的 Pi 扩展改动需�
 
 ## 历史拆分
 
-原单仓历史保留，未重写或 force-push。当前目录树只含 Engine；历史版本仍可见旧混合布局。Engine 保持现有仓库可见性，个人 Catalog 在公开的 `x12315/harness-catalog` 使用新历史维护，不携带私有工具旧源码；它不是工具的依赖或默认配置模板。升级时不要从历史目录恢复私人清单到 Engine 根目录。
+原单仓历史保留，未重写或 force-push。当前目录树只含 Engine；历史版本仍可见旧混合布局。Engine 与个人 Catalog 均公开维护；公开 Engine 会同时公开保留的原混合历史，公开前已复查完整历史的凭据风险。Catalog 在 `x12315/harness-catalog` 使用独立新历史，不混入工具历史；它不是工具的依赖或默认配置模板。升级时不要从历史目录恢复私人清单到 Engine 根目录。
+
+## 许可证
+
+本仓库采用 [MIT License](LICENSE)。Pi 派生代码保留上游版权与许可，见 [第三方说明](THIRD_PARTY_NOTICES.md)。运行时依赖、第三方 Skills 和外部服务仍遵循各自条款。
