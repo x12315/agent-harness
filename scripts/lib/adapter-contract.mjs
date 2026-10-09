@@ -25,9 +25,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { REPO } from "./repo.mjs";
+import { ENGINE } from "./repo.mjs";
 
-const ADAPTER_DIR = join(REPO, "adapters/pi");
+const ADAPTER_DIR = join(ENGINE, "adapters/pi");
 const PI_PACKAGE = "@earendil-works/pi-coding-agent";
 const MAX_REEXPORT_HOPS = 4;
 

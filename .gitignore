@@ -1,29 +1,15 @@
-# ─────────────────────────────────────────────────────────────
-# 第三方 skill 是「安装产物」，等同 node_modules：
-# 由 skills CLI 装入，用 .skill-lock.json 复现，不入库。
-# 因此默认忽略 skills/ 下全部内容，只白名单放行自有 skill。
-# 新增自有 skill 时，必须在下面加一行 !/skills/<name>/
-# ─────────────────────────────────────────────────────────────
-/skills/*
-!/skills/agent-harness/
-!/skills/book-translation/
-!/skills/self-explanatory-code/
-
-# 系统与编辑器噪声
+node_modules/
 .DS_Store
-*.swp
-
-# Python 产物（book-translation 的脚本会生成）
 __pycache__/
 *.pyc
-
-# 依赖产物（适配器若引第三方 npm 依赖时）
-node_modules/
-
-# 凭据类文件（永不入库；值走钥匙串或环境变量，见 README「凭据不入库」）
+*.harness.lock
+*.tmp-*
 .env
 .env.*
 *.pem
 *.key
 auth.json
 credentials.json
+/examples/minimal/AGENTS.md
+/examples/minimal/adapters/*/profiles/
+/examples/minimal/profiles/profile.schema.json

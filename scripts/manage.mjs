@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /** Human-facing management operations for the harness catalog. */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 import { compose, inspect } from "./compose.mjs";
-import { HOME, REPO, classify, isInsideRepo, isSymlink, managedLinks, pins } from "./lib/repo.mjs";
+import { ENGINE, HOME, REPO, classify, isInsideRepo, isSymlink, managedLinks, pins, projectionSource } from "./lib/repo.mjs";
 
 const have = (command) => spawnSync("sh", ["-c", `command -v ${command}`], { encoding: "utf8" }).status === 0;
 
@@ -15,9 +15,9 @@ function installedGlobalPackageVersion(name) {
   catch { return null; }
 }
 
-function gitState() {
-  const head = spawnSync("git", ["-C", REPO, "rev-parse", "--short", "HEAD"], { encoding: "utf8" });
-  const status = spawnSync("git", ["-C", REPO, "status", "--porcelain"], { encoding: "utf8" });
+function gitState(root = REPO) {
+  const head = spawnSync("git", ["-C", root, "rev-parse", "--short", "HEAD"], { encoding: "utf8" });
+  const status = spawnSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" });
   return {
     head: head.status === 0 ? head.stdout.trim() : "not-a-git-checkout",
     clean: status.status === 0 && !status.stdout.trim(),
@@ -40,7 +40,7 @@ export function statusReport() {
   const skills = classify();
   const compositionCurrent = [...catalog.outputs].every(([path, content]) => existsSync(path) && readFileSync(path, "utf8") === content);
   const links = managedLinks();
-  const projected = links.filter(([, target]) => existsSync(target) && isSymlink(target) && isInsideRepo(target)).length;
+  const projected = links.filter(([source, target]) => existsSync(target) && isSymlink(target) && existsSync(projectionSource(source)) && realpathSync(target) === realpathSync(projectionSource(source))).length;
   const declaredPins = pins();
   const installedProfileSwitch = installedGlobalPackageVersion("pi-profile-switch");
   const profiles = [...catalog.profiles.values()].sort((a, b) => a.name.localeCompare(b.name)).map((profile) => ({
@@ -56,6 +56,10 @@ export function statusReport() {
   return {
     ok: compositionCurrent && projected === links.length && skills.declaredNotInstalled.length === 0 && skills.installedNotDeclared.length === 0 && installedProfileSwitch === declaredPins.piProfileSwitch,
     repo: REPO,
+    catalog: REPO,
+    engine: ENGINE,
+    interfaceVersion: 1,
+    engineGit: gitState(ENGINE),
     git: gitState(),
     activePiProfile: activePiProfile(),
     profiles,
@@ -185,8 +189,13 @@ Usage:
   harness profile path <name>          Print the source file path
   harness run pi <name> [pi args...]   Launch Pi through the profile runtime
   harness run codex <name> [args...]   Launch Codex with its native profile
+  harness web                          Open the local composition workbench
   harness apply                        Compose, project, and verify
-  harness doctor                       Run read-only full verification
+  harness [--catalog=<path>] doctor [--serial]            Run the full gate (bounded parallel by default)
+  harness benchmark [--runs=3] [--out=<dir>]  Measure serial/parallel full doctor
+    [--baseline=<report.json>] [--max-regression-percent=20] [--max-median-ms=<ms>]
+  harness verify --catalog            Check generated files and projections only
+  harness verify --runtime=pi --profile=<id>  Check one adapter/Profile (pi or codex)
   harness install                      Restore a new machine
 
 Low-level commands remain available:

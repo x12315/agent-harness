@@ -29,6 +29,7 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
+import { buildAgentToolArgs, getParentActiveTools } from "./tool-policy.mjs";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -267,6 +268,7 @@ type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 interface DispatchDefaults {
 	model?: string;
 	thinkingLevel?: ThinkingLevel;
+	activeTools: string[];
 }
 
 async function runSingleAgent(
@@ -304,7 +306,7 @@ async function runSingleAgent(
 	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	args.push(...buildAgentToolArgs(dispatchDefaults.activeTools, agent.tools));
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
@@ -343,12 +345,32 @@ async function runSingleAgent(
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const invocation = getPiInvocation(args);
+			const useProcessGroup = process.platform !== "win32";
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: cwd ?? defaultCwd,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
+				detached: useProcessGroup,
 			});
 			let buffer = "";
+			let exited = false;
+			let forceKillTimer: NodeJS.Timeout | undefined;
+			const terminate = (signalName: NodeJS.Signals) => {
+				try {
+					if (useProcessGroup) process.kill(-proc.pid!, signalName);
+					else proc.kill(signalName);
+				} catch {
+					// The process may have exited between the state check and signal.
+				}
+			};
+			const killProc = () => {
+				if (exited) return;
+				wasAborted = true;
+				terminate("SIGTERM");
+				forceKillTimer = setTimeout(() => {
+					if (!exited) terminate("SIGKILL");
+				}, 5000);
+			};
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
@@ -399,22 +421,21 @@ async function runSingleAgent(
 			});
 
 			proc.on("close", (code) => {
+				exited = true;
+				if (forceKillTimer) clearTimeout(forceKillTimer);
+				if (signal) signal.removeEventListener("abort", killProc);
 				if (buffer.trim()) processLine(buffer);
 				resolve(code ?? 0);
 			});
 
 			proc.on("error", () => {
+				exited = true;
+				if (forceKillTimer) clearTimeout(forceKillTimer);
+				if (signal) signal.removeEventListener("abort", killProc);
 				resolve(1);
 			});
 
 			if (signal) {
-				const killProc = () => {
-					wasAborted = true;
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!proc.killed) proc.kill("SIGKILL");
-					}, 5000);
-				};
 				if (signal.aborted) killProc();
 				else signal.addEventListener("abort", killProc, { once: true });
 			}
@@ -485,6 +506,7 @@ export default function (pi: ExtensionAPI) {
 			const dispatchDefaults: DispatchDefaults = {
 				model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
 				thinkingLevel: ctx.thinkingLevel,
+				activeTools: getParentActiveTools(pi),
 			};
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;

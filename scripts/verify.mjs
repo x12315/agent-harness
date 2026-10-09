@@ -7,7 +7,8 @@
  *   4. every managed projection resolves into this repo
  *   5. the human control plane bypasses the model under a read-only Profile
  *   6. the pinned profile runtime and cross-harness canary work
- *   7. repo hygiene and settings ownership boundaries hold
+ *   7. subagents cannot exceed the parent Profile's active tool set
+ *   8. repo hygiene and settings ownership boundaries hold
  *
  * A check is skipped, not failed, when its harness is not installed - the repo
  * has to stay usable on a machine that only runs one of them.
@@ -16,11 +17,13 @@ import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { buildAgentToolArgs } from "../adapters/pi/extensions/subagent/tool-policy.mjs";
 import { compose } from "./compose.mjs";
 import { checkAdapterContract } from "./lib/adapter-contract.mjs";
-import { ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, PI_PROFILE_CONFIG_SKILL, REPO, SHARED_PI_SETTINGS, engineeringPiSettings, isInsideRepo, isSymlink, managedLinks, pins, readJson } from "./lib/repo.mjs";
+import { mapChecks, runCheckCommand } from "./lib/check-runner.mjs";
+import { ENGINE, ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, PI_PROFILE_CONFIG_SKILL, REPO, SHARED_PI_SETTINGS, engineeringPiSettings, isInsideRepo, isSymlink, managedLinks, pins, projectionSource, readJson, staleManagedLinks } from "./lib/repo.mjs";
 
-const PI_RUNTIME_PROBE = join(REPO, "scripts/probes/pi-runtime.ts");
+const PI_RUNTIME_PROBE = join(ENGINE, "scripts/probes/pi-runtime.ts");
 
 /**
  * Compare paths through realpath: a repo under a symlinked prefix (macOS /tmp ->
@@ -37,7 +40,7 @@ const canon = (p) => {
 
 const have = (cmd) => spawnSync("sh", ["-c", `command -v ${cmd}`], { encoding: "utf8" }).status === 0;
 
-function checkPi() {
+async function checkPi() {
   if (!have("pi")) return { name: "pi discovery", status: "skip", detail: "pi not installed" };
   const authPath = join(HOME, ".pi/agent/auth.json");
   let credentialsEmpty = !existsSync(authPath);
@@ -51,7 +54,7 @@ function checkPi() {
       detail: `pi has no credentials in this HOME (${authPath}); sign in once, then re-run`,
     };
   }
-  const r = spawnSync("pi", ["--mode", "rpc"], {
+  const r = await runCheckCommand("pi", ["--mode", "rpc"], {
     input: '{"id":"1","type":"get_commands"}\n',
     encoding: "utf8",
     timeout: 180_000,
@@ -94,7 +97,7 @@ function checkPi() {
   if (!skills.length) problems.push("no skills discovered");
   if (foreign.length) problems.push(`${foreign.length} skills from outside the repo: ${foreign.slice(0, 3).map((c) => c.name).join(", ")}`);
   if (harnessCommands.length !== 1) problems.push(`expected one /harness control-plane command, found ${harnessCommands.length}`);
-  else if (![harnessCommands[0].sourceInfo?.path, harnessCommands[0].path].filter(Boolean).map(canon).some((p) => p.startsWith(repoReal + "/"))) {
+  else if (![harnessCommands[0].sourceInfo?.path, harnessCommands[0].path].filter(Boolean).map(canon).some((p) => p.startsWith(canon(ENGINE) + "/"))) {
     problems.push("/harness control-plane command does not come from the repo");
   }
   return {
@@ -149,9 +152,7 @@ function checkCodex() {
     // offline guard against the mechanism disappearing.
     const codexFile = join(REPO, "adapters/codex/AGENTS.md");
     const pointer = existsSync(codexFile) ? readFileSync(codexFile, "utf8") : "";
-    if (!pointer.includes("本机 agent harness（硬性前置）")) {
-      problems.push("adapters/codex/AGENTS.md lost its pointer to the shared rules; Codex would never see the harness standard");
-    }
+    if (!pointer.trim()) problems.push("Catalog Codex entry is empty; shared rules must also be compiled into each Profile");
   }
   return {
     name: "codex entry",
@@ -162,14 +163,14 @@ function checkCodex() {
 }
 
 function checkProjections() {
-  const problems = [];
+  const problems = staleManagedLinks().map((target) => `${target}: stale managed projection; run harness bootstrap --apply`);
   for (const [src, target] of managedLinks()) {
-    if (!existsSync(join(REPO, src))) { problems.push(`${src}: source missing in repo`); continue; }
+    if (!existsSync(projectionSource(src))) { problems.push(`${src}: source missing in repo`); continue; }
     if (!existsSync(target)) { problems.push(`${target}: projection missing`); continue; }
     if (!isSymlink(target)) { problems.push(`${target}: not a symlink (something rewrote it)`); continue; }
     let real = "";
     try { real = realpathSync(target); } catch { problems.push(`${target}: dangling`); continue; }
-    if (!(real === REPO || real.startsWith(REPO + "/"))) problems.push(`${target}: points outside the repo -> ${real}`);
+    if (real !== canon(projectionSource(src))) problems.push(`${target}: does not point to its declared engine/Catalog source -> ${real}`);
   }
   const stray = [];
   // The claude probe used to open an interactive session instead of answering,
@@ -179,25 +180,46 @@ function checkProjections() {
   return {
     name: "projections",
     status: problems.length ? "fail" : "pass",
-    detail: `${managedLinks().length} managed projections are symlinks into the repo`,
+    detail: `${managedLinks().length} managed projections are symlinks to their exact engine/Catalog sources`,
     problems,
   };
 }
 
-function checkControlPlane() {
+function checkSubagentToolBoundary() {
+  const cases = [
+    { parent: ["read", "subagent"], agent: ["read", "bash"], expected: ["--tools", "read"] },
+    { parent: ["subagent"], agent: ["bash"], expected: ["--no-tools"] },
+    { parent: ["read", "edit", "subagent"], agent: undefined, expected: ["--tools", "read,edit"] },
+  ];
+  const problems = [];
+  for (const test of cases) {
+    const actual = buildAgentToolArgs(test.parent, test.agent);
+    if (JSON.stringify(actual) !== JSON.stringify(test.expected)) {
+      problems.push(`parent=${test.parent.join(",")} agent=${test.agent?.join(",") ?? "inherit"}: got ${actual.join(" ") || "none"}`);
+    }
+  }
+  return {
+    name: "subagent boundary",
+    status: problems.length ? "fail" : "pass",
+    detail: problems.length ? "a child Agent can exceed its parent tool policy" : "child tools are intersected with the parent Profile allowlist",
+    problems,
+  };
+}
+
+async function checkControlPlane({ serial = false } = {}) {
   const target = join(HOME, ".local/bin/harness");
   const problems = [];
   if (!existsSync(target)) problems.push(`${target}: missing; run node scripts/harness.mjs install`);
   else {
-    const r = spawnSync(target, ["status", "--json"], { encoding: "utf8", timeout: 30_000 });
+    const r = await runCheckCommand(target, ["status", "--json"], { encoding: "utf8", timeout: 30_000 });
     let report;
     try { report = JSON.parse(r.stdout); } catch { /* reported below */ }
     if (r.status !== 0 || !report?.ok) problems.push((r.stderr || report?.error || "harness status failed").trim());
     else if (!Array.isArray(report.profiles) || report.profiles.length === 0) problems.push("harness status returned no profiles");
   }
-  if (!problems.length && have("pi") && have("pi-profile")) {
-    const canary = spawnSync(process.execPath, [join(REPO, "scripts/control-plane-canary.mjs")], { encoding: "utf8", timeout: 90_000 });
-    if (canary.status !== 0) problems.push((canary.stderr || canary.stdout || "control-plane canary failed").trim());
+  if (!problems.length && have("pi")) {
+    const loop = await runCheckCommand(process.execPath, [join(ENGINE, "scripts/test-control-plane.mjs"), "--no-tui", ...(serial ? ["--serial"] : [])], { encoding: "utf8", timeout: 150_000, killSignal: "SIGKILL" });
+    if (loop.status !== 0) problems.push((loop.stderr || loop.stdout || "control-plane loop failed").trim());
   }
   return {
     name: "control plane",
@@ -207,15 +229,36 @@ function checkControlPlane() {
   };
 }
 
+async function checkControlPlaneCanary() {
+  if (!have("pi") || !have("pi-profile")) return { name: "control canary", status: "skip", detail: "pi or pi-profile not installed" };
+  const result = await runCheckCommand(process.execPath, [join(ENGINE, "scripts/control-plane-canary.mjs")], { timeout: 75_000, killSignal: "SIGKILL" });
+  return {
+    name: "control canary", status: result.status === 0 ? "pass" : "fail",
+    detail: "real Profile /harness RPC, zero model turns",
+    problems: result.status === 0 ? [] : [(result.stderr || result.stdout || result.error?.message || "control-plane canary failed").trim()],
+  };
+}
+
 function checkComposition() {
-  const r = spawnSync(process.execPath, [join(REPO, "scripts/compose.mjs")], { encoding: "utf8", timeout: 30_000 });
-  const detail = `${filesCount(join(REPO, "instructions"), ".md")} instruction modules, ${filesCount(join(REPO, "profiles"), ".json", "profile.schema.json")} profiles`;
+  const r = spawnSync(process.execPath, [join(ENGINE, "scripts/compose.mjs")], { env: { ...process.env, HARNESS_CATALOG: REPO }, encoding: "utf8", timeout: 30_000 });
+  const detail = `${instructionEntryCount(join(REPO, "instructions"))} instruction entries, ${filesCount(join(REPO, "profiles"), ".json", "profile.schema.json")} profiles`;
   return {
     name: "composition",
     status: r.status === 0 ? "pass" : "fail",
     detail: r.status === 0 ? `${detail}; generated adapters are current` : `${detail}; generated artifacts drifted`,
     problems: r.status === 0 ? [] : [(r.stdout || r.stderr || "compose failed").trim().split("\n").slice(0, 4).join("; ")],
   };
+}
+
+function instructionEntryCount(root) {
+  if (!existsSync(root)) return 0;
+  let count = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) count += instructionEntryCount(path);
+    else if (entry.name.endsWith(".md") && !entry.name.endsWith(".brief.md") && !entry.name.endsWith(".detailed.md")) count += 1;
+  }
+  return count;
 }
 
 function filesCount(root, suffix, exclude) {
@@ -229,31 +272,33 @@ function filesCount(root, suffix, exclude) {
   return count;
 }
 
-function checkProfileRuntime() {
+async function checkProfileRuntime({ profiles, adapters = ["pi", "codex"], serial = false } = {}) {
   const problems = [];
-  const expected = pins().piProfileSwitch;
-  const npmRoot = spawnSync("npm", ["root", "--global"], { encoding: "utf8" });
-  let packageRoot = "";
   let installed = null;
-  if (npmRoot.status !== 0) {
-    problems.push("npm unavailable; cannot restore pi-profile-switch");
-  } else {
-    packageRoot = join(npmRoot.stdout.trim(), "pi-profile-switch");
-    try { installed = readJson(join(packageRoot, "package.json")).version; } catch { /* missing */ }
-    if (installed !== expected) problems.push(`pi-profile-switch ${installed ?? "missing"}; declared ${expected} (run node scripts/harness.mjs install)`);
-  }
-  if (!have("pi-profile")) problems.push("pi-profile launcher missing from PATH");
+  if (adapters.includes("pi")) {
+    const expected = pins().piProfileSwitch;
+    const npmRoot = await runCheckCommand("npm", ["root", "--global"], { timeout: 30_000 });
+    let packageRoot = "";
+    if (npmRoot.status !== 0) {
+      problems.push("npm unavailable; cannot restore pi-profile-switch");
+    } else {
+      packageRoot = join(npmRoot.stdout.trim(), "pi-profile-switch");
+      try { installed = readJson(join(packageRoot, "package.json")).version; } catch { /* missing */ }
+      if (installed !== expected) problems.push(`pi-profile-switch ${installed ?? "missing"}; declared ${expected} (run node scripts/harness.mjs install)`);
+    }
+    if (!have("pi-profile")) problems.push("pi-profile launcher missing from PATH");
 
-  const nativeSkills = join(HOME, ".pi/agent/skills");
-  if (existsSync(nativeSkills)) {
-    const stray = readdirSync(nativeSkills).filter((name) => !name.startsWith(".") && name !== "profile-config");
-    for (const name of stray) problems.push(`${nativeSkills}/${name}: undeclared Pi-private skill`);
-  }
-  if (existsSync(PI_PROFILE_CONFIG_SKILL)) {
-    const template = join(packageRoot, "skills/profile-config/SKILL.md");
-    if (!existsSync(template)) problems.push("installed pi-profile-switch has no profile-config template");
-    else if (readFileSync(PI_PROFILE_CONFIG_SKILL, "utf8") !== readFileSync(template, "utf8")) {
-      problems.push(`${PI_PROFILE_CONFIG_SKILL}: differs from the declared package template`);
+    const nativeSkills = join(HOME, ".pi/agent/skills");
+    if (existsSync(nativeSkills)) {
+      const stray = readdirSync(nativeSkills).filter((name) => !name.startsWith(".") && name !== "profile-config");
+      for (const name of stray) problems.push(`${nativeSkills}/${name}: undeclared Pi-private skill`);
+    }
+    if (existsSync(PI_PROFILE_CONFIG_SKILL)) {
+      const template = join(packageRoot, "skills/profile-config/SKILL.md");
+      if (!existsSync(template)) problems.push("installed pi-profile-switch has no profile-config template");
+      else if (readFileSync(PI_PROFILE_CONFIG_SKILL, "utf8") !== readFileSync(template, "utf8")) {
+        problems.push(`${PI_PROFILE_CONFIG_SKILL}: differs from the declared package template`);
+      }
     }
   }
 
@@ -264,26 +309,32 @@ function checkProfileRuntime() {
     try { catalog = compose(); }
     catch (error) { problems.push(`cannot load profile catalog: ${error.message}`); }
   }
-  if (!problems.length && have("pi")) {
-    const baseRuntime = spawnSync("pi", ["--extension", PI_RUNTIME_PROBE, "--mode", "rpc", "--no-session"], {
-      input: '{"id":"tools","type":"prompt","message":"/harness-runtime-probe"}\n', encoding: "utf8", timeout: 180_000,
-    });
-    let defaultBuiltinTools;
-    for (const line of (baseRuntime.stdout ?? "").split("\n")) {
-      try {
-        const value = JSON.parse(line);
-        if (value.type === "extension_ui_request" && value.method === "notify") {
-          const notice = JSON.parse(value.message);
-          if (Array.isArray(notice.activeTools) && Array.isArray(notice.builtinTools)) {
-            defaultBuiltinTools = notice.activeTools.filter((name) => notice.builtinTools.includes(name)).sort();
+  const selectedProfiles = profiles ?? [...(catalog?.profiles.keys() ?? [])].sort();
+  for (const name of selectedProfiles) if (catalog && !catalog.profiles.has(name)) problems.push(`unknown profile: ${name}`);
+  if (profiles) for (const adapter of adapters) if (!have(adapter)) problems.push(`${adapter} is not installed; targeted verification cannot run`);
+  if (adapters.includes("pi") && !problems.length && have("pi")) {
+    let defaultBuiltinTools = [];
+    if (selectedProfiles.some((name) => catalog.profiles.get(name).adapters.pi.tools === undefined)) {
+      defaultBuiltinTools = undefined;
+      const baseRuntime = await runCheckCommand("pi", ["--offline", "--extension", PI_RUNTIME_PROBE, "--mode", "rpc", "--no-session"], {
+        input: '{"id":"tools","type":"prompt","message":"/harness-runtime-probe"}\n', encoding: "utf8", timeout: 180_000,
+      });
+      for (const line of (baseRuntime.stdout ?? "").split("\n")) {
+        try {
+          const value = JSON.parse(line);
+          if (value.type === "extension_ui_request" && value.method === "notify") {
+            const notice = JSON.parse(value.message);
+            if (Array.isArray(notice.activeTools) && Array.isArray(notice.builtinTools)) {
+              defaultBuiltinTools = notice.activeTools.filter((name) => notice.builtinTools.includes(name)).sort();
+            }
           }
-        }
-      } catch { /* unrelated UI events */ }
+        } catch { /* unrelated UI events */ }
+      }
+      if (baseRuntime.status !== 0 || (baseRuntime.stderr ?? "").trim() || !defaultBuiltinTools) {
+        problems.push(`Pi default tool probe failed: ${(baseRuntime.stderr ?? "").trim().slice(0, 160) || "no tool response"}`);
+      }
     }
-    if (baseRuntime.status !== 0 || (baseRuntime.stderr ?? "").trim() || !defaultBuiltinTools) {
-      problems.push(`Pi default tool probe failed: ${(baseRuntime.stderr ?? "").trim().slice(0, 160) || "no tool response"}`);
-    }
-    for (const profile of !problems.length ? [...catalog.profiles.keys()].sort() : []) {
+    for (const profile of !problems.length ? selectedProfiles : []) {
       const generated = readJson(join(REPO, `adapters/pi/profiles/${profile}.json`));
       const encodedInstruction = Buffer.from(generated.instructions ?? "", "utf8").toString("base64");
       const input = [
@@ -291,7 +342,9 @@ function checkProfileRuntime() {
         JSON.stringify({ id: "tools", type: "prompt", message: `/harness-runtime-probe ${encodedInstruction}` }),
         "",
       ].join("\n");
-      const r = spawnSync("pi-profile", [profile, "--", "--extension", PI_RUNTIME_PROBE, "--mode", "rpc", "--no-session"], {
+      // Test the Profile recommendation, not a user's persisted scoped-model filter.
+      // Widen only the canary process scope; do not override its model/thinking or write settings.
+      const r = await runCheckCommand("pi-profile", [profile, "--", "--offline", "--models", "*", "--extension", PI_RUNTIME_PROBE, "--mode", "rpc", "--no-session"], {
         input, encoding: "utf8", timeout: 180_000,
       });
       let commands;
@@ -361,19 +414,22 @@ function checkProfileRuntime() {
       }
     }
   }
-  if (!problems.length && have("codex")) {
-    const modelsResult = spawnSync("codex", ["debug", "models"], { encoding: "utf8", timeout: 120_000 });
+  if (adapters.includes("codex") && !problems.length && have("codex")) {
+    const modelsResult = await runCheckCommand("codex", ["debug", "models"], { encoding: "utf8", timeout: 120_000 });
     let codexModels = [];
     try { codexModels = JSON.parse(modelsResult.stdout ?? "{}").models ?? []; }
     catch { /* reported below */ }
     if (modelsResult.status !== 0 || (modelsResult.stderr ?? "").trim() || !codexModels.length) {
       problems.push(`Codex model catalog unavailable: ${(modelsResult.stderr ?? "").trim().slice(0, 160) || "empty model list"}`);
     }
-    for (const [profile, declaration] of !problems.length ? [...catalog.profiles.entries()].sort(([a], [b]) => a.localeCompare(b)) : []) {
+    const codexProfiles = problems.length ? [] : selectedProfiles;
+    const prompts = await mapChecks(codexProfiles, (profile) => runCheckCommand("codex", ["-p", profile, "debug", "prompt-input", "profile canary"], { timeout: 120_000 }), serial ? 1 : 3);
+    for (const [index, profile] of codexProfiles.entries()) {
+      const declaration = catalog.profiles.get(profile);
       const generated = readJson(join(REPO, `adapters/pi/profiles/${profile}.json`));
       const expectedSkills = generated.skills ?? [];
       const excludedSkills = catalog.skillCatalog.filter((name) => !expectedSkills.includes(name));
-      const r = spawnSync("codex", ["-p", profile, "debug", "prompt-input", "profile canary"], { encoding: "utf8", timeout: 120_000 });
+      const r = prompts[index];
       let text = "";
       try {
         text = JSON.parse(r.stdout ?? "[]")
@@ -382,7 +438,9 @@ function checkProfileRuntime() {
           .join("\n");
       } catch { /* reported as a runtime mismatch below */ }
       const missingSkills = expectedSkills.filter((name) => !text.includes(`(file: r0/${name}/SKILL.md)`));
-      const missingInstructions = declaration.instructions.filter((id) => !text.includes(catalog.modules.get(id).content));
+      const missingInstructions = declaration.instructions
+        .filter((selection) => !text.includes(catalog.modules.get(selection.id).variants[selection.detail].content))
+        .map((selection) => `${selection.id}@${selection.detail}`);
       const leakedSkills = excludedSkills.filter((name) => text.includes(`(file: r0/${name}/SKILL.md)`));
       const sandbox = declaration.adapters.codex.sandbox;
       const approval = declaration.adapters.codex.approval;
@@ -394,7 +452,7 @@ function checkProfileRuntime() {
       const sandboxMissing = sandbox && !text.includes(`sandbox_mode\` is \`${sandbox}\``);
       const approvalMissing = approval === "never"
         ? !text.includes("Approval policy is currently never.")
-        : approval === "on-request" && !text.includes("# Escalation Requests");
+        : approval === "on-request" && !text.includes("`approvals_reviewer` is `auto_review`");
       if (r.status !== 0
         || (r.stderr ?? "").trim()
         || missingSkills.length
@@ -410,17 +468,21 @@ function checkProfileRuntime() {
     }
   }
   return {
-    name: "profile runtime",
+    name: adapters.length === 1 ? `${adapters[0]} runtime` : "profile runtime",
     status: problems.length ? "fail" : "pass",
-    detail: `pi-profile-switch ${installed ?? "missing"}; private asset and scenario canaries verified across installed harnesses`,
+    detail: `${adapters.join("+")} runtime; profiles=[${selectedProfiles.join(", ")}]${adapters.includes("pi") ? `; pi-profile-switch ${installed ?? "missing"}` : ""}`,
     problems,
   };
 }
 
 function checkHygiene() {
-  const r = spawnSync("git", ["-C", REPO, "ls-files", "-s"], { encoding: "utf8" });
-  if (r.status !== 0) return { name: "repo hygiene", status: "skip", detail: "not a git checkout" };
   const problems = [];
+  if (ENGINE !== REPO) for (const path of ["instructions", "profiles", "skills", ".skill-lock.json"]) {
+    if (existsSync(join(ENGINE, path))) problems.push(`Engine contains personal Catalog content: ${path}`);
+  }
+  for (const root of new Set([ENGINE, REPO])) {
+  const r = spawnSync("git", ["-C", root, "ls-files", "-s"], { encoding: "utf8" });
+  if (r.status !== 0) { problems.push(`source is not a Git checkout: ${root}`); continue; }
   for (const line of (r.stdout ?? "").split("\n")) {
     if (!line.trim()) continue;
     const [meta, path] = line.split("\t");
@@ -430,10 +492,11 @@ function checkHygiene() {
       problems.push(`possible secret: ${path}`);
     }
   }
+  }
   return {
     name: "repo hygiene",
     status: problems.length ? "fail" : "pass",
-    detail: "no symlinks, node_modules or secrets committed",
+    detail: "both source repos are cleanly separated; no symlinks, node_modules or secrets committed",
     problems,
   };
 }
@@ -498,22 +561,60 @@ function checkSettingsBoundary() {
   };
 }
 
-export function run({ json = false } = {}) {
-  const checks = [checkComposition(), checkPi(), checkCodex(), checkAdapterContract(), checkProjections(), checkControlPlane(), checkProfileRuntime(), checkHygiene(), checkSettingsBoundary()];
-  const notes = observedVersions();
+/** Parse opt-in atomic checks; malformed scopes must never silently run or skip the full suite. */
+export function verificationOptions(args) {
+  const catalogOnly = args.includes("--catalog");
+  const runtime = args.filter((arg) => arg.startsWith("--runtime="));
+  const profiles = args.filter((arg) => arg.startsWith("--profile=")).map((arg) => arg.slice(10));
+  const execution = args.includes("--serial") ? { serial: true } : {};
+  if (args.some((arg) => arg.startsWith("--") && arg !== "--json" && arg !== "--serial" && arg !== "--catalog" && !arg.startsWith("--runtime=") && !arg.startsWith("--profile="))) throw new Error("Unknown verification option");
+  if (catalogOnly && (runtime.length || profiles.length)) throw new Error("--catalog cannot be combined with runtime checks");
+  if (runtime.length || profiles.length) {
+    if (runtime.length !== 1 || !["--runtime=pi", "--runtime=codex"].includes(runtime[0]) || !profiles.length || profiles.some((name) => !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name))) throw new Error("Use --runtime=pi|codex with one or more --profile=<id>");
+    return { ...execution, profiles: [...new Set(profiles)], adapters: [runtime[0].slice(10)] };
+  }
+  return { ...execution, catalogOnly };
+}
+
+/** Run all release checks by default, or explicit Catalog/adapter checks without regression tests. */
+export async function run({ json = false, catalogOnly = false, profiles, adapters, serial = false } = {}) {
+  const started = performance.now();
+  const measure = async (job) => {
+    const before = performance.now();
+    const result = await job();
+    return { ...result, durationMs: Math.round(performance.now() - before) };
+  };
+  let checks;
+  if (catalogOnly || profiles) {
+    const jobs = catalogOnly ? [checkComposition, checkProjections] : [() => checkProfileRuntime({ profiles, adapters, serial })];
+    checks = await mapChecks(jobs, measure, 1);
+  } else {
+    const staticChecks = await mapChecks([checkComposition, checkCodex, checkAdapterContract, checkProjections, checkSubagentToolBoundary, checkHygiene, checkSettingsBoundary], measure, 1);
+    const piLane = async () => mapChecks([checkPi, checkControlPlaneCanary, () => checkProfileRuntime({ adapters: ["pi"], serial })], measure, 1);
+    const lanes = await mapChecks([
+      piLane,
+      async () => [await measure(() => checkControlPlane({ serial }))],
+      async () => [await measure(() => checkProfileRuntime({ adapters: ["codex"], serial }))],
+    ], (lane) => lane(), serial ? 1 : 3);
+    checks = [...staticChecks, ...lanes.flat()];
+  }
+  const notes = catalogOnly || profiles ? [] : observedVersions();
   const ok = checks.every((c) => c.status !== "fail");
   if (json) {
-    console.log(JSON.stringify({ ok, checks, notes }, null, 2));
+    console.log(JSON.stringify({ ok, checks, notes, durationMs: Math.round(performance.now() - started), execution: serial ? "serial" : "bounded parallel" }, null, 2));
   } else {
     for (const c of checks) {
       const mark = c.status === "pass" ? "ok  " : c.status === "skip" ? "skip" : "FAIL";
-      console.log(`${mark}  ${c.name.padEnd(16)} ${c.detail}`);
+      console.log(`${mark}  ${c.name.padEnd(16)} ${c.detail} (${(c.durationMs / 1000).toFixed(3)}s)`);
       for (const p of c.problems ?? []) console.log(`        ! ${p}`);
     }
     for (const n of notes) console.log(`note  ${n}`);
-    console.log(ok ? "verify: OK" : "verify: FAILED");
+    console.log(`${ok ? "verify: OK" : "verify: FAILED"} (${((performance.now() - started) / 1000).toFixed(3)}s; ${serial ? "serial" : "bounded parallel"})`);
   }
   return ok ? 0 : 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) process.exit(run({ json: process.argv.includes("--json") }));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try { process.exitCode = await run({ json: process.argv.includes("--json"), ...verificationOptions(process.argv.slice(2)) }); }
+  catch (error) { console.error(error.message); process.exitCode = 2; }
+}

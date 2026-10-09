@@ -1,0 +1,91 @@
+#!/usr/bin/expect -f
+set timeout 30
+set engine [file normalize [file join [file dirname [info script]] "../.."]]
+set repo [exec node --input-type=module -e "import { createTuiFixture } from '$engine/scripts/tests/web-fixture.mjs'; console.log(createTuiFixture());"]
+set extension [file join $engine "adapters/pi/extensions/harness-manager.ts"]
+set profile heavy
+set keep_log [expr {$argc > 0}]
+set output [expr {$keep_log ? [lindex $argv 0] : [file join "/tmp" "harness-tui-smoke-[pid]-[clock clicks].log"]}]
+log_file -a -noappend $output
+log_user 0
+
+proc await_ready {} {
+	expect {
+		-exact "\033\[?2026l" {}
+		timeout { puts stderr "TUI smoke: initial render missing"; exit 1 }
+		eof { puts stderr "TUI smoke: Pi exited during startup"; exit 1 }
+	}
+}
+
+spawn env TERM=xterm-256color PI_OFFLINE=1 HARNESS_CATALOG=$repo pi --no-extensions --extension $extension --no-skills --no-session --offline
+await_ready
+send -- "/harness\r"
+expect {
+	-exact "Harness 管理面" {}
+	timeout { puts stderr "TUI smoke: main menu missing"; exit 1 }
+}
+expect -exact "逐项启停 repository 词条、选择详略、预览和编辑源码"
+send -- "\033\[B\r"
+expect {
+	-exact "AGENTS.md 常驻词条" {}
+	timeout { puts stderr "TUI smoke: instruction menu missing"; exit 1 }
+}
+expect -exact "每项可选精简、标准或详细说明"
+send -- "\r"
+expect {
+	-exact "AGENTS.md 词条（mandatory 锁定）" {}
+	timeout { puts stderr "TUI smoke: entry list missing"; exit 1 }
+}
+expect -exact "不可关闭的安全边界"
+send -- "\033"
+expect -exact "AGENTS.md 常驻词条"
+send -- "\033"
+expect -exact "Harness 管理面"
+send -- "\033"
+after 300
+send -- "/quit\r"
+expect eof
+
+spawn env TERM=xterm-256color PI_OFFLINE=1 HARNESS_CATALOG=$repo pi --no-extensions --extension $extension --no-skills --no-session --offline
+stty columns 48 rows 24
+await_ready
+send -- "/harness configure $profile\r"
+expect {
+	-exact {配置 } {}
+	timeout { puts stderr "TUI smoke: profile menu missing"; exit 1 }
+}
+send -- "\033\[B\r"
+expect {
+	-exact "Skills 开关" {}
+	timeout { puts stderr "TUI smoke: skills page missing"; exit 1 }
+}
+expect -exact "摘要上限：112 列"
+send -- "\033"
+expect -exact {配置 }
+send -- "\033"
+after 200
+send -- "/harness skills\r"
+expect {
+	-exact "Skills 目录（摘要列表）" {}
+	timeout { puts stderr "TUI smoke: Skills catalog missing"; exit 1 }
+}
+send -- "\r"
+expect {
+	-exact "Skill 详情 · agent-browser" {}
+	timeout { puts stderr "TUI smoke: long Skill detail missing"; exit 1 }
+}
+expect {
+	-exact "↑↓ 滚动" {}
+	timeout { puts stderr "TUI smoke: Skill detail scroll hint missing"; exit 1 }
+}
+send -- "\033"
+expect {
+	-exact "Skills 目录（摘要列表）" {}
+	timeout { puts stderr "TUI smoke: Skill detail did not return"; exit 1 }
+}
+close
+wait
+log_file
+file delete -force $repo
+if {!$keep_log} { file delete -force $output }
+puts "harness TUI smoke: OK (including narrow Skill summary/detail view)"

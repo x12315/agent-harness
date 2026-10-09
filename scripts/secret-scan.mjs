@@ -2,7 +2,7 @@
 /**
  * Look for credentials in this repo. Read-only, no dependencies.
  *
- *   node scripts/secret-scan.mjs             every tracked file (default)
+ *   node scripts/secret-scan.mjs             tracked and unignored new source files (default)
  *   node scripts/secret-scan.mjs --staged    the staged diff, for pre-commit
  *   node scripts/secret-scan.mjs --history   every commit reachable from HEAD
  *
@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { REPO } from "./lib/repo.mjs";
+import { ENGINE, REPO } from "./lib/repo.mjs";
 
 const PATTERNS = [
   ["openai/anthropic key", /\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b/g],
@@ -51,15 +51,18 @@ export function scanText(label, text) {
   return hits;
 }
 
-const git = (args, opts = {}) =>
-  spawnSync("git", args, { cwd: REPO, encoding: "utf8", maxBuffer: 128 * 1024 * 1024, ...opts }).stdout ?? "";
+const git = (root, args) => {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 });
+  if (result.status !== 0) throw new Error(`Cannot scan Git source tree: ${root}`);
+  return result.stdout ?? "";
+};
 
-function trackedHits() {
+function trackedHits(root) {
   const hits = [];
-  for (const path of git(["ls-files"]).split("\n").filter(Boolean)) {
+  for (const path of new Set(git(root, ["ls-files", "--cached", "--others", "--exclude-standard"]).split("\n").filter(Boolean))) {
     let text;
     try {
-      text = readFileSync(join(REPO, path), "utf8");
+      text = readFileSync(join(root, path), "utf8");
     } catch {
       continue; // binary or unreadable
     }
@@ -69,8 +72,8 @@ function trackedHits() {
   return hits;
 }
 
-function stagedHits() {
-  const diff = git(["diff", "--cached", "-U0", "--no-color"]);
+function stagedHits(root) {
+  const diff = git(root, ["diff", "--cached", "-U0", "--no-color"]);
   let file = "?";
   const hits = [];
   for (const line of diff.split("\n")) {
@@ -82,23 +85,26 @@ function stagedHits() {
   return hits;
 }
 
-function historyHits() {
-  return scanText("history (all commits)", git(["log", "-p", "--all", "--no-color"]));
+function historyHits(root) {
+  return scanText("history (all commits)", git(root, ["log", "-p", "--all", "--no-color"]));
 }
 
-export function run({ mode = "tracked", json = false } = {}) {
-  const hits = mode === "staged" ? stagedHits() : mode === "history" ? historyHits() : trackedHits();
+export function run({ mode = "tracked", staged = false, history = false, scanRoot, json = false } = {}) {
+  mode = history ? "history" : staged ? "staged" : mode;
+  const roots = [...new Set(scanRoot ? [scanRoot] : [ENGINE, REPO])];
+  const hits = roots.flatMap((root) => (mode === "staged" ? stagedHits(root) : mode === "history" ? historyHits(root) : trackedHits(root)).map((hit) => ({ ...hit, where: `${root}/${hit.where}` })));
   const ok = hits.length === 0;
-  if (json) console.log(JSON.stringify({ ok, mode, hits }, null, 2));
+  if (json) console.log(JSON.stringify({ ok, mode, roots, hits }, null, 2));
   else {
     for (const h of hits) console.log(`  ! ${h.where}  ${h.what}  ${h.sample}`);
-    console.log(ok ? `secret-scan (${mode}): OK` : `secret-scan (${mode}): FAILED - ${hits.length} hit(s); move the value to the Keychain or an env var`);
+    const scope = mode === "tracked" ? "tracked + untracked" : mode;
+    console.log(ok ? `secret-scan (${scope}): OK` : `secret-scan (${scope}): FAILED - ${hits.length} hit(s); move the value to the Keychain or an env var`);
   }
   return ok ? 0 : 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const argv = process.argv.slice(2);
   const mode = argv.includes("--history") ? "history" : argv.includes("--staged") ? "staged" : "tracked";
-  process.exit(run({ mode, json: argv.includes("--json") }));
+  process.exit(run({ mode, scanRoot: argv.find((arg) => arg.startsWith("--scan-root="))?.slice(12), json: argv.includes("--json") }));
 }

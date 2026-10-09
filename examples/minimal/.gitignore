@@ -1,0 +1,9 @@
+/skills/*
+*.harness.lock
+*.tmp-*
+.env
+.env.*
+auth.json
+credentials.json
+*.pem
+*.key

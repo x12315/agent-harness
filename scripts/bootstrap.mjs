@@ -11,7 +11,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { ENGINEERING_SETTING_KEYS, LOCAL_PI_SETTINGS, REPO, engineeringPiSettings, managedLinks, pins, relTarget } from "./lib/repo.mjs";
+import { ENGINEERING_SETTING_KEYS, LOCAL_PI_SETTINGS, REPO, engineeringPiSettings, managedLinks, pins, projectionSource, isSymlink, relTarget, staleManagedLinks } from "./lib/repo.mjs";
 
 /**
  * Relative link target computed from the directory's REAL path.
@@ -24,8 +24,12 @@ import { ENGINEERING_SETTING_KEYS, LOCAL_PI_SETTINGS, REPO, engineeringPiSetting
  */
 export function run({ apply = false, json = false } = {}) {
   const actions = [];
+  for (const target of staleManagedLinks()) {
+    actions.push({ source: "(removed generated profile)", target, action: "remove", detail: "dangling symlink to a removed repo profile" });
+    if (apply) rmSync(target, { force: true });
+  }
   for (const [src, target] of managedLinks()) {
-    const source = join(REPO, src);
+    const source = projectionSource(src);
     const record = (action, detail) => actions.push({ source: src, target, action, detail });
 
     if (!existsSync(source)) { record("skip", "source missing in repo"); continue; }
@@ -34,7 +38,7 @@ export function run({ apply = false, json = false } = {}) {
     try { realDir = realpathSync(dirname(target)); } catch { /* keep literal */ }
     const want = relTarget(realDir, source);
 
-    if (!existsSync(target)) {
+    if (!existsSync(target) && !isSymlink(target)) {
       record("create", want);
       if (apply) symlinkSync(want, target);
       continue;
@@ -72,7 +76,7 @@ export function run({ apply = false, json = false } = {}) {
     console.log(JSON.stringify({ ok, apply, counts, actions }, null, 2));
   } else {
     for (const a of actions) {
-      const mark = { ok: "ok  ", create: apply ? "made" : "todo", fix: apply ? "fixed" : "todo", skip: "SKIP", conflict: "FAIL" }[a.action];
+      const mark = { ok: "ok  ", create: apply ? "made" : "todo", fix: apply ? "fixed" : "todo", remove: apply ? "gone" : "todo", skip: "SKIP", conflict: "FAIL" }[a.action];
       console.log(`${mark}  ${a.target}  ${a.action === "ok" ? "" : `(${a.detail})`}`);
     }
     for (const a of settingsActions) {
@@ -80,11 +84,21 @@ export function run({ apply = false, json = false } = {}) {
       console.log(`${mark}  ${a.target}  ${a.action === "ok" ? "" : `(${a.detail})`}`);
     }
     console.log(`projections: ${Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ")}${apply ? "" : "  [dry run]"}`);
-    if (!ok && !apply) console.log(`re-run with --apply to write the ${(counts.create ?? 0) + (counts.fix ?? 0)} pending projection(s)`);
+    if (!ok && !apply) console.log(`re-run with --apply to write the ${(counts.create ?? 0) + (counts.fix ?? 0) + (counts.remove ?? 0)} pending projection change(s)`);
     if (!ok && apply) console.log("bootstrap: FAILED - resolve the conflicts/skips above");
     else console.log(ok ? "bootstrap: OK" : "bootstrap: pending");
   }
   return ok ? 0 : 1;
+}
+
+/** Compare settings values without treating formatting or top-level key order as drift. */
+export function settingsMatch(currentText, desired) {
+  try {
+    const current = JSON.parse(currentText);
+    return current !== null && typeof current === "object" && !Array.isArray(current)
+      && Object.keys(current).length === Object.keys(desired).length
+      && Object.keys(desired).every((key) => JSON.stringify(current[key]) === JSON.stringify(desired[key]));
+  } catch { return false; }
 }
 
 /**
@@ -118,7 +132,7 @@ export function mergeSettings({ apply = false } = {}) {
     /* missing */
   }
 
-  const action = legacy ? "convert" : currentText === null ? "create" : currentText === serialized ? "ok" : "merge";
+  const action = legacy ? "convert" : currentText === null ? "create" : settingsMatch(currentText, desired) ? "ok" : "merge";
   if (apply && action !== "ok") {
     mkdirSync(dirname(LOCAL_PI_SETTINGS), { recursive: true });
     if (legacy) rmSync(LOCAL_PI_SETTINGS, { force: true });

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="color-scheme" content="dark">
+	<title>Harness 控制台</title>
+	<link rel="stylesheet" href="/styles.css">
+	<script type="module" src="/app.js"></script>
+</head>
+<body>
+	<a class="skip-link" href="#main">跳到主要内容</a>
+	<div id="app" class="app-shell" aria-busy="true">
+		<header class="topbar">
+			<h1>Harness 控制台</h1>
+			<div class="topbar-status">
+				<span id="connection-state" class="status-pill"><span class="status-dot" aria-hidden="true"></span>连接中</span>
+				<button class="button ghost compact" type="button" data-action="doctor">运行检查</button>
+				<button class="button ghost compact" type="button" data-action="shutdown">关闭服务</button>
+			</div>
+		</header>
+
+		<div class="workspace">
+			<nav id="primary-nav" class="primary-nav" aria-label="主要导航"></nav>
+			<main id="main" class="main-stage" tabindex="-1">
+				<div class="loading-state" role="status">
+					<p>正在读取配置…</p>
+				</div>
+			</main>
+			<aside id="inspector" class="inspector" aria-label="详情与变更"></aside>
+		</div>
+	</div>
+
+	<div id="compact-tray" class="compact-tray" role="region" aria-label="草稿操作" hidden></div>
+	<div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+	<dialog id="profile-create-dialog" class="confirm-dialog" aria-labelledby="profile-create-title">
+		<form id="profile-create-form">
+			<h2 id="profile-create-title">新建方案</h2>
+			<div class="section-stack">
+				<label class="field"><span>初始配置</span><select id="profile-create-base"></select><span class="helper">复制使用来源方案已保存的配置，不包含未保存修改。空白方案仅启用只读工具与管理扩展，模型继承本机默认值。</span></label>
+				<label class="field"><span>方案 ID</span><input id="profile-create-id" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" autocomplete="off"><span class="helper">用于启动命令和配置文件名。使用英文字母、数字、点、短横线或下划线，以字母或数字开头。创建后不随显示名称变化。</span></label>
+				<label class="field"><span>方案名称</span><input id="profile-create-label" required></label>
+				<label class="field"><span>说明</span><textarea id="profile-create-description" required></textarea></label>
+			</div>
+			<p id="profile-create-error" role="alert"></p>
+			<p class="helper">创建后自动生成 Pi/Codex 配置并运行检查，不会切换当前会话。</p>
+			<div class="dialog-actions"><button class="button ghost" type="button" data-action="cancel-create-profile">取消</button><button class="button primary" id="profile-create-submit" type="submit">创建方案</button></div>
+		</form>
+	</dialog>
+	<dialog id="profile-delete-dialog" class="confirm-dialog" aria-labelledby="profile-delete-title">
+		<form id="profile-delete-form">
+			<h2 id="profile-delete-title">删除方案</h2>
+			<p id="profile-delete-summary"></p>
+			<ul><li>删除方案源文件、生成配置和受管入口。</li><li>不删除共享指令、Skills、认证或历史会话。</li><li>已运行的会话不会关闭，但之后不能再使用此 ID 启动或切换方案。</li></ul>
+			<p id="profile-delete-dirty" class="helper"></p>
+			<label class="field"><span>输入方案 ID 确认删除</span><input id="profile-delete-confirm" required autocomplete="off"></label>
+			<p id="profile-delete-error" role="alert"></p>
+			<p class="helper">删除前保留快照；检查失败时尝试恢复，冲突或恢复失败时保留备份供人工处理。</p>
+			<div class="dialog-actions"><button class="button ghost" type="button" data-action="cancel-delete-profile">取消</button><button class="button danger" id="profile-delete-submit" type="submit" disabled>删除方案</button></div>
+		</form>
+	</dialog>
+	<dialog id="instruction-editor" class="confirm-dialog instruction-editor" aria-labelledby="editor-title">
+		<h2 id="editor-title">编辑指令内容</h2>
+		<p class="helper">修改此版本会影响所有引用它的方案。保存失败时保留编辑内容；发生冲突时需先处理冲突。</p>
+		<label class="field"><span>完整 Markdown 文本</span><textarea id="instruction-text" spellcheck="false"></textarea></label>
+		<details><summary>对照修改前的完整原文</summary><pre id="instruction-original" class="health-output" tabindex="0"></pre></details>
+		<p id="instruction-error" role="status"></p>
+		<button id="load-latest-instruction" class="button ghost" data-action="load-latest-instruction" hidden>加载最新原文，保留编辑草稿</button>
+		<div class="dialog-actions"><button class="button ghost" data-action="close-editor">返回详情</button><button class="button primary" data-action="save-instruction-text">保存修改</button></div>
+	</dialog>
+	<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
+		<form method="dialog">
+			<h2 id="confirm-title">保存这些变更？</h2>
+			<div id="confirm-body" class="confirm-body"></div>
+			<div class="dialog-actions">
+				<button class="button ghost" value="cancel">取消</button>
+				<button id="confirm-save" class="button primary" value="confirm">确认保存</button>
+			</div>
+		</form>
+	</dialog>
+</body>
+</html>

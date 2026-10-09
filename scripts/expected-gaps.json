@@ -1,5 +1,0 @@
-{
-  "note": "Reconcile allows exactly these differences; anything not listed fails the gate. Empty means declaration and disk agree exactly. Add an entry only with a reason, and remove it the moment the gap is resolved.",
-  "declaredNotInstalled": {},
-  "installedNotDeclared": {}
-}

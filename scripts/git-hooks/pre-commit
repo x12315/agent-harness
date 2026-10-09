@@ -1,11 +1,5 @@
 #!/bin/sh
-# Opt-in pre-commit checks: keep the declaration in agreement with the disk, and
-# keep credentials out of the history.
-# Enable with: git config core.hooksPath scripts/git-hooks
-# Disable with: git config --unset core.hooksPath
-# Offline and fast on purpose - the pi/codex probes belong in `harness.mjs verify`.
+# The engine checks its own staged source; Catalog validation is a separate gate.
 set -e
 root=$(git rev-parse --show-toplevel)
-node "$root/scripts/compose.mjs"
-node "$root/scripts/reconcile.mjs"
-exec node "$root/scripts/secret-scan.mjs" --staged
+exec node "$root/scripts/secret-scan.mjs" --scan-root="$root" --staged

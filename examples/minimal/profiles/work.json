@@ -1,0 +1,24 @@
+{
+  "label": "Work",
+  "description": "Minimal independent Catalog",
+  "instructions": [],
+  "skills": [],
+  "adapters": {
+    "pi": {
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls"
+      ],
+      "extensions": [
+        "harness-manager"
+      ],
+      "mcps": []
+    },
+    "codex": {
+      "sandbox": "read-only",
+      "approval": "on-request"
+    }
+  }
+}

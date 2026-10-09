@@ -1,0 +1,9 @@
+{
+  "mandatory": [
+    {
+      "id": "mandatory/safety",
+      "detail": "standard"
+    }
+  ],
+  "repository": []
+}

@@ -7,8 +7,10 @@
  *   status      show the human-facing control plane (default)
  *   profile     list/show/edit declared profiles
  *   run         launch Pi or Codex with a declared profile
+ *   web         open the local Harness composition workbench
  *   apply       compose, project, and verify
  *   doctor      run the read-only full verification
+ *   benchmark   measure full doctor serial/parallel performance and compare release reports
  *   compose     compile instruction/profile sources (check unless --apply)
  *   bootstrap   project the repo into the harness paths (dry run unless --apply)
  *   restore     delegate declared skills/adapter dependencies to their installers
@@ -32,16 +34,18 @@ import { run as drift } from "./drift.mjs";
 import { run as reconcile } from "./reconcile.mjs";
 import { run as secretScan } from "./secret-scan.mjs";
 import { run as restore } from "./restore.mjs";
-import { run as verify } from "./verify.mjs";
+import { run as verify, verificationOptions } from "./verify.mjs";
 import { editProfile, help, runProfile, showProfilePath, showProfiles, showStatus } from "./manage.mjs";
 
-const argv = process.argv.slice(2);
+import { CATALOG, catalogArguments } from "./lib/repo.mjs";
+const argv = catalogArguments().args;
+process.env.HARNESS_CATALOG = CATALOG;
 const command = ["--help", "-h"].includes(argv[0]) ? "help" : argv[0]?.startsWith("-") ? "status" : argv[0] ?? "status";
-const options = { apply: argv.includes("--apply"), all: argv.includes("--all"), json: argv.includes("--json") };
+const options = { apply: argv.includes("--apply"), all: argv.includes("--all"), json: argv.includes("--json"), serial: argv.includes("--serial"), staged: argv.includes("--staged"), history: argv.includes("--history"), scanRoot: argv.find((arg) => arg.startsWith("--scan-root="))?.slice(12) };
 const runners = { compose, bootstrap, restore, reconcile, drift, verify, secrets: secretScan };
 const heading = (text) => process.stdout.write(`\n== ${text}\n`);
 
-function runChecks(runOptions) {
+async function runChecks(runOptions) {
   let result = 0;
   heading(`compose${runOptions.apply ? " (applying)" : ""}`);
   if (compose(runOptions) !== 0) result = 1;
@@ -50,14 +54,12 @@ function runChecks(runOptions) {
     result = 1;
     for (const step of nextSteps()) process.stdout.write(`  next: ${step}\n`);
   }
-  if (!runOptions.json) {
-    heading("reconcile");
-    if (reconcile(runOptions) !== 0) result = 1;
-    heading("secrets");
-    if (secretScan(runOptions) !== 0) result = 1;
-    heading("verify");
-    if (verify(runOptions) !== 0) result = 1;
-  }
+  heading("reconcile");
+  if (reconcile(runOptions) !== 0) result = 1;
+  heading("secrets");
+  if (secretScan(runOptions) !== 0) result = 1;
+  heading("verify");
+  if (await verify(runOptions) !== 0) result = 1;
   return result;
 }
 
@@ -73,17 +75,27 @@ if (command === "status") {
   else if (action === "path") code = showProfilePath(argv[2]);
   else if (action === "edit") {
     code = editProfile(argv[2]);
-    if (code === 0) code = runChecks({ ...options, apply: true });
+    if (code === 0) code = await runChecks({ ...options, apply: true });
   } else {
     // Backward-compatible shorthand: `harness profile review`.
     code = showProfiles(action, options);
   }
 } else if (command === "run") {
   code = runProfile(argv[1], argv[2], argv.slice(3));
+} else if (command === "web") {
+  const { runHarnessWeb } = await import("./web.mjs");
+  const portArg = argv.find((argument) => argument.startsWith("--port="));
+  await runHarnessWeb({
+    port: portArg ? Number(portArg.slice("--port=".length)) : 0,
+    open: !argv.includes("--no-open"),
+  });
+} else if (command === "benchmark") {
+  const { run } = await import("./benchmark-doctor.mjs");
+  code = await run(argv.slice(1));
 } else if (command === "apply") {
-  code = runChecks({ ...options, apply: true });
+  code = await runChecks({ ...options, apply: true });
 } else if (command === "doctor" || command === "all") {
-  code = runChecks({ ...options, apply: command === "all" && options.apply });
+  code = await runChecks({ ...options, apply: command === "all" && options.apply });
 } else if (command === "install") {
   // The first install cannot use the projected `harness` executable yet.
   heading("compose");
@@ -98,8 +110,11 @@ if (command === "status") {
     heading("secrets");
     if (secretScan(options) !== 0) code = 1;
     heading("verify");
-    if (verify(options) !== 0) code = 1;
+    if (await verify(options) !== 0) code = 1;
   }
+} else if (command === "verify") {
+  try { code = await verify({ ...options, ...verificationOptions(argv.slice(1)) }); }
+  catch (error) { console.error(error.message); code = 2; }
 } else if (Object.hasOwn(runners, command)) {
   code = (await runners[command](options)) ?? 0;
 } else {
@@ -107,4 +122,4 @@ if (command === "status") {
   help();
   code = 2;
 }
-process.exit(code);
+if (command !== "web") process.exit(code);

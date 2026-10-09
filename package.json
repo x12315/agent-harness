@@ -1,0 +1,13 @@
+{
+  "name": "harness-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "harness": "bin/harness" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node scripts/test-control-plane.mjs",
+    "test:benchmark": "node --test scripts/tests/doctor-benchmark.test.mjs",
+    "doctor": "node scripts/harness.mjs doctor"
+  }
+}

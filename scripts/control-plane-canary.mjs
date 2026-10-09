@@ -1,22 +1,39 @@
 #!/usr/bin/env node
 /** Exercise the human /harness path without sending a request to a model. */
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
+import { compose } from "./compose.mjs";
 
-const child = spawn("pi-profile", ["ask", "--", "--mode", "rpc", "--no-session"], {
+const profile = [...compose().profiles.keys()].sort()[0];
+if (!profile) throw new Error("No Profile is available for the control-plane canary.");
+const child = spawn("pi-profile", [profile, "--", "--mode", "rpc", "--no-session", "--offline"], {
+  env: { ...process.env, PI_OFFLINE: "1" },
   stdio: ["pipe", "pipe", "pipe"],
+  detached: process.platform !== "win32",
 });
+const decoder = new StringDecoder("utf8");
 const events = [];
 let stdoutBuffer = "";
 let stderr = "";
 let answered = false;
-let finished = false;
+let failure;
+let forceKillTimer;
+
+function terminate(signal) {
+  try {
+    if (process.platform !== "win32") process.kill(-child.pid, signal);
+    else child.kill(signal);
+  } catch {
+    // The child may already be gone.
+  }
+}
 
 function fail(message) {
-  if (finished) return;
-  finished = true;
-  child.kill("SIGTERM");
-  console.error(`control-plane canary: FAILED - ${message}`);
-  process.exitCode = 1;
+  if (failure) return;
+  failure = message;
+  terminate("SIGTERM");
+  forceKillTimer = setTimeout(() => terminate("SIGKILL"), 2_000);
+  forceKillTimer.unref();
 }
 
 function handleLine(line) {
@@ -32,7 +49,7 @@ function handleLine(line) {
 }
 
 child.stdout.on("data", (chunk) => {
-  stdoutBuffer += chunk.toString("utf8");
+  stdoutBuffer += decoder.write(chunk);
   while (true) {
     const newline = stdoutBuffer.indexOf("\n");
     if (newline < 0) break;
@@ -45,16 +62,18 @@ child.stdout.on("data", (chunk) => {
 child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
 child.on("error", (error) => fail(error.message));
 child.on("close", (code) => {
-  if (finished) return;
-  finished = true;
+  clearTimeout(timeout);
+  if (forceKillTimer) clearTimeout(forceKillTimer);
+  stdoutBuffer += decoder.end();
   if (stdoutBuffer) handleLine(stdoutBuffer);
   const notification = events.find((event) =>
     event.type === "extension_ui_request"
       && event.method === "notify"
       && event.message?.includes("Harness Control Plane")
-      && event.message?.includes("当前 Pi    ask"));
+      && event.message?.includes(`当前 Pi    ${profile}`));
   const agentStarted = events.some((event) => event.type === "agent_start");
   const problems = [];
+  if (failure) problems.push(failure);
   if (code !== 0) problems.push(`pi-profile exited ${code}`);
   if (!answered) problems.push("RPC prompt was not accepted");
   if (!notification) problems.push("control-plane status notification missing");
@@ -64,7 +83,7 @@ child.on("close", (code) => {
     console.error(`control-plane canary: FAILED - ${problems.join("; ")}`);
     process.exitCode = 1;
   } else {
-    console.log("control-plane canary: OK (/harness status in ask, zero model turns)");
+    console.log(`control-plane canary: OK (/harness status in ${profile}, zero model turns)`);
   }
 });
 

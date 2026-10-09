@@ -1,45 +1,81 @@
-import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
+	getSelectListTheme,
 	getSettingsListTheme,
+	parseFrontmatter,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
+import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
+import {
+	acquireCatalogLock,
+	atomicWrite,
+	CATALOG,
+	ENGINE,
+	modelSelectionPool,
+	planCatalogValidation,
+	scanText,
+	releaseCatalogLock,
+	setInstructionSelection,
+	summarizeSkillDescription,
+} from "./harness-manager-state.mjs";
 import {
 	type AutocompleteItem,
 	Container,
+	fuzzyFilter,
+	Input,
+	type SelectItem,
+	SelectList,
 	type SettingItem,
 	SettingsList,
 	Text,
 } from "@earendil-works/pi-tui";
 
-const REPO = join(homedir(), ".agents");
-const HARNESS_SCRIPT = join(REPO, "scripts", "harness.mjs");
+const REPO = CATALOG;
+const HARNESS_SCRIPT = process.env.HARNESS_ENGINE_ENTRY || join(ENGINE, "scripts", "harness.mjs");
 const PROFILES_DIR = join(REPO, "profiles");
 const SKILLS_DIR = join(REPO, "skills");
-const ACTIONS = ["status", "profiles", "configure", "switch", "apply", "doctor", "restore", "help"];
-const GUIDANCE_MODULES = ["profile/model-weak", "profile/model-standard"];
-const GUIDANCE_LABELS = {
-	weak: "弱模型 · 强约束、逐步验证",
-	standard: "标准模型 · 适度计划与验证",
-	strong: "强模型 · 最小额外约束",
+const INSTRUCTIONS_DIR = join(REPO, "instructions");
+const INSTRUCTION_SELECTION = join(INSTRUCTIONS_DIR, "selection.json");
+const ACTIONS = ["status", "profiles", "instructions", "skills", "configure", "web", "switch", "apply", "doctor", "restore", "help"];
+const DETAIL_LABELS = {
+	brief: "精简",
+	standard: "标准",
+	detailed: "详细",
 } as const;
-type Guidance = keyof typeof GUIDANCE_LABELS;
-
-const FULL_EXTENSIONS = ["bookmark", "handoff", "harness-manager", "pi-goal-x", "pi-web-ui", "subagent"];
-const EXECUTION_MODES = {
-	"只读探索": { piTools: ["read", "grep", "find", "ls"], extensions: ["harness-manager"], codexSandbox: "read-only", approval: "never", behavior: "read-only" },
-	"检索调研": { piTools: ["read", "bash", "grep", "find", "ls"], extensions: ["harness-manager"], codexSandbox: "read-only", approval: "never", behavior: "research" },
-	"编码实现": { piTools: ["read", "bash", "edit", "write", "grep", "find", "ls"], extensions: ["bookmark", "handoff", "harness-manager"], codexSandbox: "workspace-write", approval: "on-request", behavior: "implementation" },
-	"全量能力": { piTools: undefined, extensions: FULL_EXTENSIONS, codexSandbox: "workspace-write", approval: "on-request", behavior: "implementation" },
-} as const;
-type ExecutionMode = keyof typeof EXECUTION_MODES;
+const INSTRUCTION_PRESENTATION: Record<string, { title: string; description: string }> = {
+	"profile/concise": { title: "简洁沟通", description: "先给结论，再报告关键证据、改动、验证和风险" },
+	"profile/implementation": { title: "实施模式", description: "约束代码修改、接口保持和完成前验证" },
+	"profile/model-standard": { title: "标准模型指导", description: "要求简短计划、关键假设核验和结果验收" },
+	"profile/model-weak": { title: "弱模型指导", description: "要求小步执行、逐项检查并在冲突时停下确认" },
+	"profile/read-only": { title: "只读模式", description: "只允许检查和解释，不改变本地、浏览器或远端状态" },
+	"profile/research": { title: "调研模式", description: "以证据为中心检索，并保持本地与远端状态不变" },
+	"profile/review": { title: "审查模式", description: "优先检查正确性、安全、回归和缺失测试" },
+	"profile/strategic": { title: "全局规划与复杂问题", description: "建立系统边界、比较方案并验证关键假设" },
+};
+type DetailLevel = keyof typeof DETAIL_LABELS;
+type InstructionLayer = "mandatory" | "repository" | "profile";
+type InstructionSelection = { id: string; detail: DetailLevel };
+type InstructionEntry = {
+	id: string;
+	layer: InstructionLayer;
+	title: string;
+	description: string;
+	variants: Record<DetailLevel, string>;
+};
+type GlobalInstructionSelection = {
+	mandatory: InstructionSelection[];
+	repository: InstructionSelection[];
+};
+type CatalogSkill = { name: string; description: string };
 
 type ProfileSource = {
 	label: string;
 	description: string;
-	instructions: string[];
+	instructions: InstructionSelection[];
 	skills: string[];
 	adapters: {
 		pi: {
@@ -59,16 +95,19 @@ type ProfileSource = {
 const HELP = `Harness Control Plane / Harness 管理面
 
 /harness                         打开管理面
-/harness status                  查看 catalog 与 runtime 状态
-/harness profiles                查看全部 Profile
-/harness configure <name>        用开关和表单配置 Profile
-/harness switch <name>           切换当前 Pi 工作 Profile
+/harness status                  查看 Catalog 与 runtime 状态
+/harness profiles                查看三个脚手架预设
+/harness instructions            管理 AGENTS.md 常驻词条、详略和源码
+/harness skills                  浏览 Skill 完整说明
+/harness configure <name>        配置 Profile 词条、Skills 与推荐模型
+/harness web                     打开本地 Web 编排工作台
+/harness switch <name>           在 Profile 会话中热切换脚手架
 /harness apply                   生成、投影并验收
 /harness doctor                  运行只读完整检查
 /harness restore                 通过官方工具恢复声明依赖
-/harness edit <name>             高级：直接编辑 JSON
+/harness edit <name>             高级：直接编辑 Profile JSON
 
-这是人类触发的管理命令，不受当前工作 Profile 的 tools 权限约束。`;
+AGENTS.md 词条是 instruction，不是 Subagent 角色。mandatory 词条不可关闭；repository 和 Profile 词条可逐项启停。`;
 
 function profileNames(): string[] {
 	if (!existsSync(PROFILES_DIR)) return [];
@@ -78,12 +117,33 @@ function profileNames(): string[] {
 		.sort();
 }
 
-function catalogSkillNames(): string[] {
+function profileChoice(name: string): SelectItem {
+	try {
+		const profile = JSON.parse(readFileSync(join(PROFILES_DIR, `${name}.json`), "utf8"));
+		return { value: name, label: profile.label ?? name, description: `${profile.description ?? ""}  [${name}]` };
+	} catch {
+		return { value: name, label: name, description: "配置无法读取" };
+	}
+}
+
+function catalogSkills(): CatalogSkill[] {
 	if (!existsSync(SKILLS_DIR)) return [];
 	return readdirSync(SKILLS_DIR, { withFileTypes: true })
 		.filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && existsSync(join(SKILLS_DIR, entry.name, "SKILL.md")))
-		.map((entry) => entry.name)
-		.sort();
+		.map((entry) => {
+			try {
+				const parsed = parseFrontmatter<{ description?: unknown }>(readFileSync(join(SKILLS_DIR, entry.name, "SKILL.md"), "utf8"));
+				return {
+					name: entry.name,
+					description: typeof parsed.frontmatter.description === "string"
+						? parsed.frontmatter.description.replace(/\s+/g, " ").trim()
+						: "无说明",
+				};
+			} catch {
+				return { name: entry.name, description: "说明无法读取" };
+			}
+		})
+		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function skillCategory(name: string): string {
@@ -105,53 +165,118 @@ function selectedSkillNames(profile: ProfileSource, catalog: string[]): Set<stri
 	return selected;
 }
 
-function guidanceOf(profile: ProfileSource): Guidance {
-	if (profile.instructions.includes("profile/model-weak")) return "weak";
-	if (profile.instructions.includes("profile/model-standard")) return "standard";
-	return "strong";
-}
-
-function setExecutionBehavior(profile: ProfileSource, behavior: "read-only" | "research" | "implementation") {
-	const behaviorModules = ["profile/read-only", "profile/research", "profile/implementation"];
-	const instructions = profile.instructions.filter((id) => !behaviorModules.includes(id));
-	const selected = behavior === "research"
-		? ["profile/read-only", "profile/research"]
-		: [`profile/${behavior}`];
-	const guidanceIndex = instructions.findIndex((id) => GUIDANCE_MODULES.includes(id) || id === "profile/concise");
-	instructions.splice(guidanceIndex < 0 ? instructions.length : guidanceIndex, 0, ...selected);
-	profile.instructions = instructions;
-}
-
-function setGuidance(profile: ProfileSource, guidance: Guidance) {
-	const instructions = profile.instructions.filter((id) => !GUIDANCE_MODULES.includes(id));
-	const module = guidance === "strong" ? undefined : `profile/model-${guidance}`;
-	if (module) {
-		const concise = instructions.indexOf("profile/concise");
-		instructions.splice(concise < 0 ? instructions.length : concise, 0, module);
+function instructionEntries(): InstructionEntry[] {
+	const entries: InstructionEntry[] = [];
+	for (const layer of ["mandatory", "repository", "profile"] as const) {
+		const dir = join(INSTRUCTIONS_DIR, layer);
+		if (!existsSync(dir)) continue;
+		for (const file of readdirSync(dir).filter((name) => name.endsWith(".md") && !name.endsWith(".brief.md") && !name.endsWith(".detailed.md")).sort()) {
+			const base = basename(file, ".md");
+			const variants = {
+				brief: join(dir, `${base}.brief.md`),
+				standard: join(dir, file),
+				detailed: join(dir, `${base}.detailed.md`),
+			};
+			if (!Object.values(variants).every(existsSync)) continue;
+			const standard = readFileSync(variants.standard, "utf8").trim();
+			const id = `${layer}/${base}`;
+			const presentation = INSTRUCTION_PRESENTATION[id];
+			const title = presentation?.title ?? standard.match(/^#{1,6}\s+(.+)$/m)?.[1]?.trim() ?? base;
+			const description = presentation?.description ?? standard
+				.replace(/^#{1,6}\s+.+$/m, "")
+				.split(/\n\s*\n/)
+				.map((part) => part.replace(/\s+/g, " ").trim())
+				.find(Boolean) ?? "无说明";
+			entries.push({ id, layer, title, description, variants });
+		}
 	}
-	profile.instructions = instructions;
+	return entries;
 }
 
-function sameSet(a: string[] | undefined, b: readonly string[] | undefined): boolean {
-	if (a === undefined || b === undefined) return a === undefined && b === undefined;
-	return a.length === b.length && a.every((value) => b.includes(value));
-}
-
-function executionModeOf(profile: ProfileSource): ExecutionMode | "自定义" {
-	for (const [label, mode] of Object.entries(EXECUTION_MODES) as [ExecutionMode, { piTools: readonly string[] | undefined; extensions: readonly string[]; codexSandbox: string; approval: string; behavior: "read-only" | "research" | "implementation" }][]) {
-		const has = (id: string) => profile.instructions.includes(id);
-		const behaviorMatches = mode.behavior === "research"
-			? has("profile/read-only") && has("profile/research") && !has("profile/implementation")
-			: mode.behavior === "read-only"
-				? has("profile/read-only") && !has("profile/research") && !has("profile/implementation")
-				: has("profile/implementation") && !has("profile/read-only") && !has("profile/research");
-		if (sameSet(profile.adapters.pi.tools, mode.piTools)
-			&& sameSet(profile.adapters.pi.extensions, mode.extensions)
-			&& profile.adapters.codex.sandbox === mode.codexSandbox
-			&& profile.adapters.codex.approval === mode.approval
-			&& behaviorMatches) return label;
+async function selectDetailed(
+	ctx: ExtensionCommandContext,
+	title: string,
+	items: SelectItem[],
+	current?: string,
+): Promise<string | undefined> {
+	if (!items.length) return undefined;
+	if (ctx.mode !== "tui") {
+		const choices = items.map((item) => ({ item, display: `${item.label}${item.description ? ` — ${item.description}` : ""}` }));
+		const selected = await ctx.ui.select(title, choices.map((choice) => choice.display));
+		return choices.find((choice) => choice.display === selected)?.item.value;
 	}
-	return "自定义";
+	return ctx.ui.custom<string | undefined>((tui, theme, _keybindings, done) => {
+		const container = new Container();
+		container.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
+		const list = new SelectList(items, Math.min(items.length, 14), getSelectListTheme(), { minPrimaryColumnWidth: 14, maxPrimaryColumnWidth: 30 });
+		const selectedIndex = current ? items.findIndex((item) => item.value === current) : -1;
+		if (selectedIndex >= 0) list.setSelectedIndex(selectedIndex);
+		list.onSelect = (item) => done(item.value);
+		list.onCancel = () => done(undefined);
+		container.addChild(list);
+		return {
+			render: (width: number) => container.render(width),
+			invalidate: () => container.invalidate(),
+			handleInput: (data: string) => {
+				list.handleInput(data);
+				tui.requestRender();
+			},
+		};
+	});
+}
+
+async function selectSearchable(
+	ctx: ExtensionCommandContext,
+	title: string,
+	items: SelectItem[],
+	current?: string,
+): Promise<string | undefined> {
+	if (ctx.mode !== "tui") return selectDetailed(ctx, title, items, current);
+	if (!items.length) return undefined;
+	return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
+		const input = new Input();
+		input.focused = true;
+		let filtered = items;
+		let list: SelectList;
+		const rebuildList = () => {
+			list = new SelectList(filtered, Math.min(filtered.length, 12), getSelectListTheme(), { minPrimaryColumnWidth: 18, maxPrimaryColumnWidth: 36 });
+			const selectedIndex = current ? filtered.findIndex((item) => item.value === current) : -1;
+			if (selectedIndex >= 0 && !input.getValue()) list.setSelectedIndex(selectedIndex);
+			list.onSelect = (item) => done(item.value);
+			list.onCancel = () => done(undefined);
+		};
+		rebuildList();
+		input.onSubmit = () => {
+			const selected = list.getSelectedItem();
+			if (selected) done(selected.value);
+		};
+		input.onEscape = () => done(undefined);
+		const titleText = new Text(theme.fg("accent", theme.bold(title)), 1, 0);
+		const hintText = new Text(theme.fg("muted", "输入关键词搜索 · ↑↓ 选择 · Enter 确认 · Esc 返回"), 1, 0);
+		return {
+			focused: true,
+			render: (width: number) => [
+				...titleText.render(width),
+				...input.render(width),
+				...list.render(width),
+				...hintText.render(width),
+			],
+			invalidate: () => {
+				input.invalidate();
+				list.invalidate();
+			},
+			handleInput: (data: string) => {
+				if (keybindings.matches(data, "tui.select.cancel")) done(undefined);
+				else if (keybindings.matches(data, "tui.select.up") || keybindings.matches(data, "tui.select.down") || keybindings.matches(data, "tui.select.confirm")) list.handleInput(data);
+				else {
+					input.handleInput(data);
+					filtered = fuzzyFilter(items, input.getValue(), (item) => `${item.label} ${item.description ?? ""}`);
+					rebuildList();
+				}
+				tui.requestRender();
+			},
+		};
+	});
 }
 
 function compactOutput(stdout: string, stderr: string): string {
@@ -161,11 +286,20 @@ function compactOutput(stdout: string, stderr: string): string {
 }
 
 export default function harnessManager(pi: ExtensionAPI) {
+	function hasProfileRuntime(): boolean {
+		const runtimeDir = process.env.PI_CODING_AGENT_DIR;
+		if (!runtimeDir || !pi.getCommands().some((command) => command.name === "profile")) return false;
+		try {
+			const plan = JSON.parse(readFileSync(join(runtimeDir, "pi-profile.json"), "utf8"));
+			return typeof plan.profile === "string" && typeof plan.agentDir === "string";
+		} catch {
+			return false;
+		}
+	}
+
 	async function runHarness(args: string[], ctx: ExtensionCommandContext, timeout = 600_000) {
 		ctx.ui.setStatus("harness-manager", `harness ${args.join(" ")}`);
 		try {
-			// Status intentionally sees the active profile. Other management commands
-			// must escape its frozen runtime dir and inspect the real global harness.
 			if (args[0] === "status") return await pi.exec(process.execPath, [HARNESS_SCRIPT, ...args], { timeout });
 			return await pi.exec("env", ["-u", "PI_CODING_AGENT_DIR", process.execPath, HARNESS_SCRIPT, ...args], { timeout });
 		} finally {
@@ -185,33 +319,95 @@ export default function harnessManager(pi: ExtensionAPI) {
 			ctx.ui.notify(`没有在 ${PROFILES_DIR} 找到 Profile`, "error");
 			return undefined;
 		}
-		return ctx.ui.select(title, names);
+		return selectDetailed(ctx, title, names.map(profileChoice));
 	}
 
-	async function applyProfileSource(
-		name: string,
+	async function applyCatalogSource(
+		label: string,
 		source: string,
 		original: string,
 		edited: string,
 		ctx: ExtensionCommandContext,
 	) {
-		const backup = join(tmpdir(), `harness-${name}-${Date.now()}.json`);
-		const temporary = `${source}.tmp-${process.pid}`;
-		writeFileSync(backup, original);
-		writeFileSync(temporary, edited.endsWith("\n") ? edited : `${edited}\n`);
-		renameSync(temporary, source);
+		let lock: ReturnType<typeof acquireCatalogLock>;
+		let catalogLock: ReturnType<typeof acquireCatalogLock> | undefined;
+		try {
+			catalogLock = acquireCatalogLock(join(REPO, ".catalog"));
+			lock = acquireCatalogLock(source);
+		}
+		catch (error) {
+			if (catalogLock) releaseCatalogLock(catalogLock);
+			ctx.ui.notify(`保存已停止：另一个 Harness 管理会话正在修改该源码。\n${error instanceof Error ? error.message : error}`, "error");
+			return;
+		}
+		try {
+		const safeLabel = label.replace(/[^a-zA-Z0-9._-]+/g, "-");
+		const suffix = source.endsWith(".json") ? ".json" : ".md";
+		const backup = join(tmpdir(), `harness-${safeLabel}-${Date.now()}${suffix}`);
+		let current: string;
+		try { current = readFileSync(source, "utf8"); }
+		catch (error) {
+			ctx.ui.notify(`保存已停止：源码在配置期间不可读取。未写入任何内容。\n${error instanceof Error ? error.message : error}`, "error");
+			return;
+		}
+		if (current !== original) {
+			const concurrent = backup.replace(suffix, `.concurrent${suffix}`);
+			writeFileSync(backup, original);
+			writeFileSync(concurrent, current);
+			ctx.ui.notify(`保存已停止：${source} 在配置期间被其他会话修改。为避免覆盖，未写入任何内容。\n打开时版本：${backup}\n当前版本：${concurrent}`, "error");
+			return;
+		}
+		const written = edited.endsWith("\n") ? edited : `${edited}\n`;
+		if (scanText(source, written).length) {
+			ctx.ui.notify("保存已停止：内容包含疑似凭据。请使用环境变量或原生凭据存储。", "error");
+			return;
+		}
+		let plan: ReturnType<typeof planCatalogValidation>;
+		try { plan = planCatalogValidation({ repo: REPO, source, before: original, after: written }); }
+		catch (error) { ctx.ui.notify(`配置格式不正确：${error instanceof Error ? error.message : error}`, "error"); return; }
+		const runPlan = async (validation: ReturnType<typeof planCatalogValidation>) => {
+			const output: string[] = [];
+			for (const step of validation.steps) {
+				const started = Date.now();
+				const result = await runHarness(step.args, ctx, step.timeout);
+				output.push(`${step.name} (${Date.now() - started}ms)\n${compactOutput(result.stdout, result.stderr)}`);
+				if (result.code !== 0) return { code: result.code, stdout: output.join("\n\n"), stderr: "" };
+			}
+			return { code: 0, stdout: output.join("\n\n"), stderr: "" };
+		};
+		writeFileSync(backup, original, { mode: 0o600, flag: "wx" });
+		try { atomicWrite(source, written, `${process.pid}-save`, original); }
+		catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ECHANGED") throw error;
+			const concurrent = backup.replace(suffix, `.concurrent${suffix}`);
+			writeFileSync(concurrent, readFileSync(source, "utf8"));
+			ctx.ui.notify(`保存已停止：${source} 在原子替换前被其他进程修改。未覆盖其内容。\n打开时版本：${backup}\n当前版本：${concurrent}`, "error");
+			return;
+		}
 
 		const rollback = async (): Promise<{ ok: boolean; detail: string }> => {
-			try { writeFileSync(source, original); }
-			catch (error) { return { ok: false, detail: `源码恢复失败：${error instanceof Error ? error.message : error}` }; }
-			const recomposed = await runHarness(["compose", "--apply"], ctx, 60_000);
-			if (recomposed.code !== 0) return { ok: false, detail: `重新生成失败：${compactOutput(recomposed.stdout, recomposed.stderr)}` };
-			const reprojected = await runHarness(["bootstrap", "--apply"], ctx, 60_000);
-			if (reprojected.code !== 0) return { ok: false, detail: `重新投影失败：${compactOutput(reprojected.stdout, reprojected.stderr)}` };
-			const reverified = await runHarness(["doctor"], ctx);
+			let rollbackCurrent: string;
+			try { rollbackCurrent = readFileSync(source, "utf8"); }
+			catch (error) { return { ok: false, detail: `自动回滚停止：源码不可读取；原版本仍在 ${backup}。${error instanceof Error ? error.message : error}` }; }
+			if (rollbackCurrent !== written) {
+				const concurrent = backup.replace(suffix, `.rollback-conflict${suffix}`);
+				writeFileSync(concurrent, rollbackCurrent);
+				return { ok: false, detail: `自动回滚停止：验证期间源码被其他会话修改，未覆盖其内容。原版本：${backup}；当前版本快照：${concurrent}` };
+			}
+			try { atomicWrite(source, original, `${process.pid}-rollback`, written); }
+			catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ECHANGED") {
+					const concurrent = backup.replace(suffix, `.rollback-race${suffix}`);
+					writeFileSync(concurrent, readFileSync(source, "utf8"));
+					return { ok: false, detail: `自动回滚停止：原子恢复前源码再次变化，未覆盖其内容。当前版本快照：${concurrent}` };
+				}
+				return { ok: false, detail: `源码恢复失败：${error instanceof Error ? error.message : error}` };
+			}
+			const recoveryPlan = planCatalogValidation({ repo: REPO, source, before: written, after: original });
+			const reverified = await runPlan(recoveryPlan);
 			return {
 				ok: reverified.code === 0,
-				detail: reverified.code === 0 ? "原配置已恢复并通过完整复验。" : `原配置已写回，但复验失败：${compactOutput(reverified.stdout, reverified.stderr)}`,
+				detail: reverified.code === 0 ? "原配置已恢复并通过受影响项复验。" : `原配置已写回，但复验失败：${compactOutput(reverified.stdout, reverified.stderr)}`,
 			};
 		};
 		const rejectAndRollback = async (reason: string, failed: { stdout: string; stderr: string }) => {
@@ -221,63 +417,136 @@ export default function harnessManager(pi: ExtensionAPI) {
 				"error",
 			);
 		};
-		const composed = await runHarness(["compose", "--apply"], ctx, 60_000);
-		if (composed.code !== 0) {
-			await rejectAndRollback("Profile 未通过验证", composed);
-			return;
+		const verified = await runPlan(plan);
+		if (verified.code !== 0) return await rejectAndRollback("受影响项检查失败", verified);
+		ctx.ui.notify(`已更新 ${label}，受影响项检查通过（未运行完整 doctor）。新会话立即生效；运行中的 Pi 请 /reload 或重选 Profile。\n备份：${backup}\n${compactOutput(verified.stdout, verified.stderr)}`, "info");
+		} finally {
+			try { releaseCatalogLock(lock); }
+			finally { if (catalogLock) releaseCatalogLock(catalogLock); }
 		}
-		const projected = await runHarness(["bootstrap", "--apply"], ctx, 60_000);
-		if (projected.code !== 0) {
-			await rejectAndRollback("Profile 投影失败", projected);
-			return;
+	}
+
+	function launchWeb(ctx: ExtensionCommandContext) {
+		const logPath = join(tmpdir(), `harness-web-${process.pid}-${Date.now()}.log`);
+		const log = openSync(logPath, "wx", 0o600);
+		const env = {
+			...process.env,
+			HARNESS_CATALOG: REPO,
+			HARNESS_MODEL_SCOPE: JSON.stringify(ctx.scopedModels.map((entry) => ({
+				provider: entry.model.provider,
+				id: entry.model.id,
+				thinking: entry.thinkingLevel,
+			}))),
+		};
+		delete env.PI_CODING_AGENT_DIR;
+		try {
+			const child = spawn(process.execPath, [HARNESS_SCRIPT, "web"], {
+				cwd: REPO,
+				detached: true,
+				env,
+				stdio: ["ignore", log, log],
+			});
+			child.once("error", (error) => ctx.ui.notify(`Harness Web 启动失败：${error.message}`, "error"));
+			child.unref();
+			ctx.ui.notify(`正在启动 Harness Web。浏览器应自动打开；启动日志：${logPath}`, "info");
+		} finally {
+			closeSync(log);
 		}
-		const verified = await runHarness(["doctor"], ctx);
-		if (verified.code !== 0) {
-			await rejectAndRollback("完整检查失败", verified);
-			return;
-		}
-		ctx.ui.notify(`已更新 ${name}，新会话已生效。如果当前正在使用 ${name}，运行 /profile reload 可立即重载；否则在需要时切换到该 Profile。\n备份：${backup}\n${compactOutput(verified.stdout, verified.stderr)}`, "info");
 	}
 
 	async function switchProfile(name: string | undefined, ctx: ExtensionCommandContext) {
-		const selected = name || await chooseProfile(ctx, "选择工作 Profile");
+		const selected = name || await chooseProfile(ctx, "选择工作脚手架");
 		if (!selected) return;
 		if (!profileNames().includes(selected)) {
 			ctx.ui.notify(`未知 Profile：${selected}`, "error");
 			return;
 		}
+		if (!hasProfileRuntime()) {
+			ctx.ui.notify([
+				"当前是普通 Pi 会话，不能在运行中安全替换启动时发现的 Skills、Extensions 与 Instructions。",
+				`要进入“${profileChoice(selected).label}”，请退出后运行：pi-profile ${selected}`,
+				"pi-profile 只建立隔离的 Pi 资源目录；进入会话后仍由 Pi 原生 extension 与 /harness 管理。",
+			].join("\n\n"), "warning");
+			return;
+		}
 		pi.sendUserMessage(`/profile use ${selected}`, { expandPromptTemplates: true });
+	}
+
+	async function browseSkills(ctx: ExtensionCommandContext) {
+		const catalog = catalogSkills();
+		while (true) {
+			const selected = await selectSearchable(ctx, "Skills 目录（摘要列表）", [
+				...catalog.map((skill) => ({
+					value: skill.name,
+					label: skill.name,
+					description: summarizeSkillDescription(skill.description),
+				})),
+				{ value: "__back", label: "返回上级", description: "返回上一层菜单" },
+			]);
+			if (!selected || selected === "__back") return;
+			const skill = catalog.find((entry) => entry.name === selected);
+			if (!skill) continue;
+			if (ctx.mode !== "tui") {
+				ctx.ui.notify(`${skill.name}\n\n${skill.description}\n\n来源：${join(SKILLS_DIR, skill.name, "SKILL.md")}`, "info");
+				return;
+			}
+			await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
+				const title = new Text(theme.fg("accent", theme.bold(`Skill 详情 · ${skill.name}`)), 1, 0);
+				const body = new Text(`${skill.description}\n\n来源：${join(SKILLS_DIR, skill.name, "SKILL.md")}`, 2, 0);
+				let scrollTop = 0;
+				return {
+					render: (width: number) => {
+						const titleLines = title.render(width);
+						const bodyLines = body.render(width);
+						const pageSize = Math.max(3, tui.terminal.rows - titleLines.length - 2);
+						const maxScrollTop = Math.max(0, bodyLines.length - pageSize);
+						scrollTop = Math.min(scrollTop, maxScrollTop);
+						const progress = bodyLines.length > pageSize ? ` · ${scrollTop + 1}-${Math.min(scrollTop + pageSize, bodyLines.length)}/${bodyLines.length}` : "";
+						return [...titleLines, ...bodyLines.slice(scrollTop, scrollTop + pageSize), theme.fg("muted", `  ↑↓ 滚动 · Enter/Esc 返回${progress}`)];
+					},
+					invalidate: () => {
+						title.invalidate();
+						body.invalidate();
+					},
+					handleInput: (data: string) => {
+						if (keybindings.matches(data, "tui.select.cancel") || keybindings.matches(data, "tui.select.confirm")) done(undefined);
+						else if (keybindings.matches(data, "tui.select.up")) scrollTop = Math.max(0, scrollTop - 1);
+						else if (keybindings.matches(data, "tui.select.down")) scrollTop += 1;
+						tui.requestRender();
+					},
+				};
+			});
+		}
 	}
 
 	async function configureSkills(profile: ProfileSource, ctx: ExtensionCommandContext) {
 		if (ctx.mode !== "tui") {
-			ctx.ui.notify("Skills 开关需要 Pi TUI；请在交互会话中运行 /harness configure。", "error");
+			ctx.ui.notify("Skills 开关需要 Pi TUI。", "error");
 			return;
 		}
-		const catalog = catalogSkillNames();
-		const selected = selectedSkillNames(profile, catalog);
+		const catalog = catalogSkills();
+		const selected = selectedSkillNames(profile, catalog.map((skill) => skill.name));
 		const initialSelection = new Set(selected);
-		const ordered = catalog.sort((a, b) => `${skillCategory(a)} ${a}`.localeCompare(`${skillCategory(b)} ${b}`));
+		const ordered = catalog.sort((a, b) => `${skillCategory(a.name)} ${a.name}`.localeCompare(`${skillCategory(b.name)} ${b.name}`));
 		await ctx.ui.custom((tui, theme, _keybindings, done) => {
 			const container = new Container();
-			container.addChild(new Text(theme.fg("accent", theme.bold("Skills 开关（可直接输入关键词搜索）")), 1, 0));
+			container.addChild(new Text(theme.fg("accent", theme.bold("Skills 开关（输入关键词搜索，Esc 返回上级）")), 1, 0));
+			container.addChild(new Text(theme.fg("muted", "摘要上限：112 列；完整说明：/harness skills"), 1, 0));
 			if (profile.skills.some((pattern) => pattern.includes("*") || pattern.includes("?"))) {
-				container.addChild(new Text(theme.fg("muted", "当前使用自动匹配；首次切换后会固定为显式清单。"), 1, 0));
+				container.addChild(new Text(theme.fg("muted", "当前使用自动匹配；首次实际切换后会固定为显式清单。"), 1, 0));
 			}
-			const items: SettingItem[] = ordered.map((name) => ({
-				id: name,
-				label: `${skillCategory(name)} · ${name}`,
-				currentValue: selected.has(name) ? "启用" : "关闭",
+			const items: SettingItem[] = ordered.map((skill) => ({
+				id: skill.name,
+				label: `${skillCategory(skill.name)} · ${skill.name}`,
+				description: summarizeSkillDescription(skill.description),
+				currentValue: selected.has(skill.name) ? "启用" : "关闭",
 				values: ["启用", "关闭"],
 			}));
 			const settings = new SettingsList(
 				items,
 				Math.min(items.length + 2, 20),
 				getSettingsListTheme(),
-				(id, value) => {
-					if (value === "启用") selected.add(id);
-					else selected.delete(id);
-				},
+				(id, value) => value === "启用" ? selected.add(id) : selected.delete(id),
 				() => done(undefined),
 				{ enableSearch: true },
 			);
@@ -291,40 +560,210 @@ export default function harnessManager(pi: ExtensionAPI) {
 				},
 			};
 		});
-		const selectionChanged = selected.size !== initialSelection.size
-			|| [...selected].some((name) => !initialSelection.has(name));
-		if (selectionChanged) profile.skills = [...selected].sort();
+		const changed = selected.size !== initialSelection.size || [...selected].some((name) => !initialSelection.has(name));
+		if (changed) profile.skills = [...selected].sort();
+	}
+
+	function piModelPool(ctx: ExtensionCommandContext): Model<Api>[] {
+		return modelSelectionPool(ctx.scopedModels, ctx.modelRegistry.getAvailable());
+	}
+
+	async function configurePiModel(profile: ProfileSource, ctx: ExtensionCommandContext) {
+		const current = profile.adapters.pi.model;
+		const models = piModelPool(ctx);
+		if (!models.length) {
+			ctx.ui.notify("当前 session scope 和已认证 provider 中没有可选模型。请先用 /login 或 /model 配置 Pi。", "warning");
+			return;
+		}
+		const byProvider = new Map<string, Model<Api>[]>();
+		for (const model of models) {
+			const providerModels = byProvider.get(model.provider) ?? [];
+			providerModels.push(model);
+			byProvider.set(model.provider, providerModels);
+		}
+		const scopeLabel = ctx.scopedModels.length > 0 ? "当前 session scope" : "已认证 provider";
+		const provider = await selectDetailed(ctx, `选择 Pi provider（${scopeLabel}）`, [...byProvider].map(([id, providerModels]) => ({
+			value: id,
+			label: id,
+			description: `${ctx.modelRegistry.getProviderDisplayName(id)} · ${providerModels.length} 个模型`,
+		})), current?.provider);
+		if (!provider) return;
+		const providerModels = byProvider.get(provider) ?? [];
+		const modelId = await selectSearchable(ctx, `选择 Pi model [${provider}]`, providerModels.map((model) => ({
+			value: model.id,
+			label: model.id,
+			description: `${model.name}${model.contextWindow ? ` · ${Math.round(model.contextWindow / 1000)}k context` : ""}${model.reasoning ? " · reasoning" : ""}`,
+		})), current?.provider === provider ? current.id : undefined);
+		if (!modelId) return;
+		const selected = providerModels.find((model) => model.id === modelId);
+		if (!selected) return;
+		const levels = getSupportedThinkingLevels(selected);
+		const currentThinking = levels.find((level) => level === current?.thinking);
+		const thinking = await selectDetailed(ctx, `选择 thinking [${provider}/${modelId}]`, levels.map((level) => ({
+			value: level,
+			label: level,
+			description: level === "off" ? "关闭推理" : "模型支持的推理强度",
+		})), currentThinking);
+		if (!thinking) return;
+		profile.adapters.pi.model = { provider, id: modelId, thinking };
+	}
+
+	async function configureCodexModel(profile: ProfileSource, ctx: ExtensionCommandContext) {
+		const current = profile.adapters.codex.model;
+		const action = await selectDetailed(ctx, "配置 Codex 推荐模型", [
+			{ value: "pi", label: "跟随 Pi 模型", description: profile.adapters.pi.model ? `${profile.adapters.pi.model.id}:${profile.adapters.pi.model.thinking ?? "off"}；保存时仅检查该方案的 Codex 兼容性` : "Pi 当前继承默认模型" },
+			{ value: "manual", label: "高级：手动输入", description: `当前 ${current?.id ?? "继承"}:${current?.thinking ?? "off"}；仅用于 Pi 无法枚举的 Codex 模型` },
+			{ value: "back", label: "返回上级", description: "保留当前 Codex 推荐模型" },
+		]);
+		if (!action || action === "back") return;
+		if (action === "pi") {
+			const piModel = profile.adapters.pi.model;
+			if (!piModel) {
+				ctx.ui.notify("Pi Profile 当前继承默认模型，无法生成明确的 Codex 推荐值。", "warning");
+				return;
+			}
+			profile.adapters.codex.model = { id: piModel.id, ...(piModel.thinking ? { thinking: piModel.thinking } : {}) };
+			return;
+		}
+		const id = await ctx.ui.input(`Codex model（当前：${current?.id ?? "继承"}）`, "输入 Codex model id");
+		if (id === undefined || !id.trim()) return;
+		const thinking = await selectDetailed(ctx, "选择 Codex thinking", ["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((level) => ({
+			value: level,
+			label: level,
+			description: "保存时检查该方案的 Codex 模型兼容性",
+		})), current?.thinking);
+		if (!thinking) return;
+		profile.adapters.codex.model = { id: id.trim(), thinking };
 	}
 
 	async function configureModels(profile: ProfileSource, ctx: ExtensionCommandContext) {
-		const currentPi = profile.adapters.pi.model;
-		const piProvider = await ctx.ui.input(`Pi provider（当前：${currentPi?.provider ?? "继承"}）`, "留空保持当前");
-		if (piProvider === undefined) return;
-		const piModel = await ctx.ui.input(`Pi model（当前：${currentPi?.id ?? "继承"}）`, "留空保持当前");
-		if (piModel === undefined) return;
-		const codexModel = await ctx.ui.input(`Codex model（当前：${profile.adapters.codex.model?.id ?? "继承"}）`, "留空保持当前");
-		if (codexModel === undefined) return;
-		if (piProvider.trim() || piModel.trim()) {
-			profile.adapters.pi.model = {
-				provider: piProvider.trim() || currentPi?.provider || "openai-codex",
-				id: piModel.trim() || currentPi?.id || "gpt-5.5",
-				...(currentPi?.thinking ? { thinking: currentPi.thinking } : {}),
-			};
-		}
-		if (codexModel.trim()) {
-			profile.adapters.codex.model = {
-				id: codexModel.trim(),
-				...(profile.adapters.codex.model?.thinking ? { thinking: profile.adapters.codex.model.thinking } : {}),
-			};
+		while (true) {
+			const piModel = profile.adapters.pi.model;
+			const codexModel = profile.adapters.codex.model;
+			const action = await selectDetailed(ctx, "推荐模型", [
+				{ value: "pi", label: "Pi 推荐模型", description: `${piModel?.provider ?? "继承"}/${piModel?.id ?? "继承"}:${piModel?.thinking ?? "off"}；从当前 scope 搜索选择` },
+				{ value: "codex", label: "Codex 推荐模型", description: `${codexModel?.id ?? "继承"}:${codexModel?.thinking ?? "off"}；可跟随 Pi 或高级输入` },
+				{ value: "back", label: "返回上级", description: "返回 Profile 配置" },
+			]);
+			if (!action || action === "back") return;
+			if (action === "pi") await configurePiModel(profile, ctx);
+			else await configureCodexModel(profile, ctx);
 		}
 	}
 
-	async function configureProfile(name: string | undefined, ctx: ExtensionCommandContext) {
-		if (ctx.mode !== "tui") {
-			ctx.ui.notify("友好配置器需要 Pi TUI。可使用 /harness status 查看状态。", "error");
+	async function editInstruction(entry: InstructionEntry, detail: DetailLevel, ctx: ExtensionCommandContext) {
+		const source = entry.variants[detail];
+		const original = readFileSync(source, "utf8");
+		const edited = await ctx.ui.editor(`编辑 ${entry.title} · ${DETAIL_LABELS[detail]}`, original);
+		if (edited === undefined || edited === original) return;
+		const impact = entry.layer === "mandatory" || entry.layer === "repository"
+			? "这会影响所有 Harness 会话。"
+			: "这会影响所有选择该词条与详略档位的 Profile。";
+		if (!await ctx.ui.confirm("应用 instruction 源码修改？", `${impact}\n源码：${source}`)) return;
+		await applyCatalogSource(`${entry.id}@${detail}`, source, original, edited, ctx);
+	}
+
+	async function configureInstructionEntry(
+		entry: InstructionEntry,
+		selections: InstructionSelection[],
+		locked: boolean,
+		ctx: ExtensionCommandContext,
+	) {
+		while (true) {
+			const selected = selections.find((selection) => selection.id === entry.id);
+			const detail = selected?.detail ?? "standard";
+			const action = await selectDetailed(ctx, entry.title, [
+				{ value: "toggle", label: "启用状态", description: locked ? "不可关闭的安全底线" : selected ? "已启用；选择可关闭" : "已关闭；选择可启用" },
+				{ value: "detail", label: "说明详略", description: `${DETAIL_LABELS[detail]}；选择该词条注入给模型的完整版本` },
+				{ value: "preview", label: "预览当前内容", description: `查看 ${entry.id}@${detail} 的实际 Markdown` },
+				{ value: "edit", label: "编辑当前内容", description: "编辑 instruction 源码；生成物会自动重建并验收" },
+				{ value: "back", label: "返回上级", description: "保留本层尚未保存的选择" },
+			]);
+			if (!action || action === "back") return;
+			if (action === "toggle") {
+				if (locked) ctx.ui.notify("mandatory 词条属于不可关闭的安全边界，只能调整详略或编辑源码。", "warning");
+				else setInstructionSelection(selections, entry.id, selected ? undefined : detail);
+			} else if (action === "detail") {
+				const chosen = await selectDetailed(ctx, "选择说明详略", [
+					{ value: "brief", label: "精简", description: "只保留改变行为所需的核心约束" },
+					{ value: "standard", label: "标准", description: "日常默认，兼顾约束、解释与上下文负担" },
+					{ value: "detailed", label: "详细", description: "展开步骤、边界、例外和完成条件" },
+				], detail);
+				if (chosen) setInstructionSelection(selections, entry.id, chosen as DetailLevel);
+			} else if (action === "preview") {
+				ctx.ui.notify(`${entry.id}@${detail}\n\n${readFileSync(entry.variants[detail], "utf8").trim()}`, "info");
+			} else if (action === "edit") {
+				await editInstruction(entry, detail, ctx);
+			}
+		}
+	}
+
+	async function configureInstructionList(
+		title: string,
+		entries: InstructionEntry[],
+		selections: InstructionSelection[],
+		lockedIds: Set<string>,
+		ctx: ExtensionCommandContext,
+	) {
+		while (true) {
+			const selected = await selectDetailed(ctx, title, [
+				...entries.map((entry) => {
+					const active = selections.find((selection) => selection.id === entry.id);
+					const state = lockedIds.has(entry.id) ? `常驻 · ${DETAIL_LABELS[active?.detail ?? "standard"]}` : active ? `启用 · ${DETAIL_LABELS[active.detail]}` : "关闭";
+					return { value: entry.id, label: entry.title, description: `${state}；${entry.description}` };
+				}),
+				{ value: "__back", label: "返回上级", description: "返回上一层菜单" },
+			]);
+			if (!selected || selected === "__back") return;
+			const entry = entries.find((candidate) => candidate.id === selected);
+			if (entry) await configureInstructionEntry(entry, selections, lockedIds.has(entry.id), ctx);
+		}
+	}
+
+	async function configureGlobalInstructions(ctx: ExtensionCommandContext) {
+		const entries = instructionEntries().filter((entry) => entry.layer !== "profile");
+		const original = readFileSync(INSTRUCTION_SELECTION, "utf8");
+		let draft: GlobalInstructionSelection;
+		try { draft = structuredClone(JSON.parse(original)); }
+		catch (error) {
+			ctx.ui.notify(`instruction selection 无法读取：${error instanceof Error ? error.message : error}`, "error");
 			return;
 		}
-		const selected = name || await chooseProfile(ctx, "选择要配置的 Profile");
+		while (true) {
+			const combined = [...draft.mandatory, ...draft.repository];
+			const choice = await selectDetailed(ctx, "AGENTS.md 常驻词条", [
+				{ value: "entries", label: "逐项管理", description: `${combined.length}/${entries.length} 已启用；每项可选精简、标准或详细说明` },
+				{ value: "save", label: "保存并应用", description: "重建 AGENTS.md、投影并运行完整检查" },
+				{ value: "back", label: "返回上级", description: "放弃本次尚未保存的启停与详略修改" },
+			]);
+			if (!choice || choice === "back") return;
+			if (choice === "entries") {
+				await configureInstructionList(
+					"AGENTS.md 词条（mandatory 锁定）",
+					entries,
+					combined,
+					new Set(draft.mandatory.map((selection) => selection.id)),
+					ctx,
+				);
+				const mandatoryIds = new Set(draft.mandatory.map((selection) => selection.id));
+				draft.mandatory = combined.filter((selection) => mandatoryIds.has(selection.id));
+				draft.repository = combined.filter((selection) => !mandatoryIds.has(selection.id));
+			} else if (choice === "save") {
+				const edited = `${JSON.stringify(draft, null, 2)}\n`;
+				if (!await ctx.ui.confirm("保存 AGENTS.md 词条选择？", `常驻 ${draft.mandatory.length + draft.repository.length}/${entries.length}；mandatory ${draft.mandatory.length} 项不可关闭。`)) continue;
+				await applyCatalogSource("instruction-selection", INSTRUCTION_SELECTION, original, edited, ctx);
+				return;
+			}
+		}
+	}
+
+	async function configureProfileInstructions(profile: ProfileSource, ctx: ExtensionCommandContext) {
+		const entries = instructionEntries().filter((entry) => entry.layer === "profile");
+		await configureInstructionList("Profile instruction 词条", entries, profile.instructions, new Set(), ctx);
+	}
+
+	async function configureProfile(name: string | undefined, ctx: ExtensionCommandContext) {
+		const selected = name || await chooseProfile(ctx, "选择要配置的脚手架");
 		if (!selected) return;
 		const source = join(PROFILES_DIR, `${selected}.json`);
 		if (!existsSync(source)) {
@@ -340,48 +779,29 @@ export default function harnessManager(pi: ExtensionAPI) {
 		}
 
 		while (true) {
-			const skills = selectedSkillNames(draft, catalogSkillNames());
-			const guidance = guidanceOf(draft);
-			const executionMode = executionModeOf(draft);
-			const choice = await ctx.ui.select(`配置 ${selected} · ${draft.description}`, [
-				`模型能力指导：${GUIDANCE_LABELS[guidance]}`,
-				`Skills 开关：${skills.size}/${catalogSkillNames().length} 已启用`,
-				`执行权限：${executionMode}`,
-				`推荐模型：Pi ${draft.adapters.pi.model?.provider ?? "inherit"}/${draft.adapters.pi.model?.id ?? "inherit"} · Codex ${draft.adapters.codex.model?.id ?? "inherit"}`,
-				"保存并应用",
-				"取消",
+			const catalog = catalogSkills();
+			const skills = selectedSkillNames(draft, catalog.map((skill) => skill.name));
+			const choice = await selectDetailed(ctx, `配置 ${draft.label} [${selected}]`, [
+				{ value: "instructions", label: "Profile 词条", description: `${draft.instructions.length} 项；逐项启停、选择详略、预览或编辑` },
+				{ value: "skills", label: "Skills 能力", description: `已启用 ${skills.size}/${catalog.length}；控制模型可发现的专业流程` },
+				{ value: "models", label: "推荐模型", description: `Pi ${draft.adapters.pi.model?.provider ?? "继承"}/${draft.adapters.pi.model?.id ?? "继承"} · Codex ${draft.adapters.codex.model?.id ?? "继承"}` },
+				{ value: "save", label: "保存并应用", description: "重新生成、投影并完整检查；失败时自动回滚" },
+				{ value: "back", label: "返回上级", description: "放弃本次尚未保存的 Profile 修改" },
 			]);
-			if (!choice || choice === "取消") return;
-			if (choice.startsWith("模型能力指导")) {
-				const label = await ctx.ui.select("当前模型能力", Object.values(GUIDANCE_LABELS));
-				const value = (Object.entries(GUIDANCE_LABELS) as [Guidance, string][]).find(([, text]) => text === label)?.[0];
-				if (value) setGuidance(draft, value);
-			} else if (choice.startsWith("Skills 开关")) {
-				await configureSkills(draft, ctx);
-			} else if (choice.startsWith("执行权限")) {
-				const mode = await ctx.ui.select("跨 Harness 执行权限", Object.keys(EXECUTION_MODES));
-				if (mode && mode in EXECUTION_MODES) {
-					const selectedMode = EXECUTION_MODES[mode as ExecutionMode];
-					if (selectedMode.piTools) draft.adapters.pi.tools = [...selectedMode.piTools];
-					else delete draft.adapters.pi.tools;
-					draft.adapters.pi.extensions = [...selectedMode.extensions];
-					draft.adapters.codex.sandbox = selectedMode.codexSandbox;
-					draft.adapters.codex.approval = selectedMode.approval;
-					setExecutionBehavior(draft, selectedMode.behavior);
-				}
-			} else if (choice.startsWith("推荐模型")) {
-				await configureModels(draft, ctx);
-			} else if (choice === "保存并应用") {
+			if (!choice || choice === "back") return;
+			if (choice === "instructions") await configureProfileInstructions(draft, ctx);
+			else if (choice === "skills") await configureSkills(draft, ctx);
+			else if (choice === "models") await configureModels(draft, ctx);
+			else if (choice === "save") {
 				const summary = [
-					`Profile：${selected}`,
-					`模型能力：${GUIDANCE_LABELS[guidanceOf(draft)]}`,
-					`Skills：${selectedSkillNames(draft, catalogSkillNames()).size}/${catalogSkillNames().length}`,
-					`执行权限：${executionModeOf(draft)}`,
-					`Pi 模型：${draft.adapters.pi.model?.provider ?? "inherit"}/${draft.adapters.pi.model?.id ?? "inherit"}`,
-					`Codex 模型：${draft.adapters.codex.model?.id ?? "inherit"}`,
+					`Profile：${draft.label} [${selected}]`,
+					`Instructions：${draft.instructions.map((selection) => `${selection.id}@${selection.detail}`).join(", ") || "无"}`,
+					`Skills：${selectedSkillNames(draft, catalog.map((skill) => skill.name)).size}/${catalog.length}`,
+					`Pi 模型：${draft.adapters.pi.model?.provider ?? "继承"}/${draft.adapters.pi.model?.id ?? "继承"}`,
+					`Codex 模型：${draft.adapters.codex.model?.id ?? "继承"}`,
 				].join("\n");
 				if (!await ctx.ui.confirm("保存并应用？", summary)) continue;
-				await applyProfileSource(selected, source, original, `${JSON.stringify(draft, null, 2)}\n`, ctx);
+				await applyCatalogSource(selected, source, original, `${JSON.stringify(draft, null, 2)}\n`, ctx);
 				return;
 			}
 		}
@@ -404,15 +824,13 @@ export default function harnessManager(pi: ExtensionAPI) {
 			return;
 		}
 		if (!await ctx.ui.confirm("应用高级修改？", `更新 ${source}，重新生成 Pi/Codex adapter 并运行验收。`)) return;
-		await applyProfileSource(selected, source, original, edited, ctx);
+		await applyCatalogSource(selected, source, original, edited, ctx);
 	}
 
 	async function mutate(action: "apply" | "restore", args: string[], ctx: ExtensionCommandContext) {
 		const confirmed = args.includes("--yes") || await ctx.ui.confirm(
 			`${action === "apply" ? "应用 Catalog" : "恢复依赖"}？`,
-			action === "apply"
-				? "重新生成 adapter、修复受管投影并运行验收。"
-				: "委托固定版本的官方工具安装声明依赖，然后运行验收。",
+			action === "apply" ? "重新生成 adapter、修复受管投影并运行验收。" : "委托固定版本的官方工具安装声明依赖，然后运行验收。",
 		);
 		if (!confirmed) return;
 		if (action === "apply") await notifyRun(["apply"], ctx);
@@ -425,34 +843,39 @@ export default function harnessManager(pi: ExtensionAPI) {
 		if (action === "help") ctx.ui.notify(HELP, "info");
 		else if (action === "status") await notifyRun(["status"], ctx, 30_000);
 		else if (action === "profiles") await notifyRun(["profile", "list"], ctx, 30_000);
+		else if (action === "instructions") await configureGlobalInstructions(ctx);
+		else if (action === "skills") await browseSkills(ctx);
 		else if (action === "configure") await configureProfile(words[1], ctx);
+		else if (action === "web") launchWeb(ctx);
 		else if (action === "switch") await switchProfile(words[1], ctx);
 		else if (action === "edit") await editProfile(words[1], ctx);
 		else if (action === "apply") await mutate("apply", words.slice(1), ctx);
 		else if (action === "doctor") await notifyRun(["doctor"], ctx);
 		else if (action === "restore") await mutate("restore", words.slice(1), ctx);
 		else if (action) ctx.ui.notify(`未知 harness 操作：${action}\n\n${HELP}`, "error");
-		else if (ctx.mode !== "tui") ctx.ui.notify(HELP, "info");
 		else {
-			const selected = await ctx.ui.select("Harness 管理面", [
-				"查看状态",
-				"配置 Profile",
-				"切换工作 Profile",
-				"应用 Catalog",
-				"完整检查",
-				"恢复依赖",
-			]);
-			if (selected === "查看状态") await handle("status", ctx);
-			else if (selected === "配置 Profile") await handle("configure", ctx);
-			else if (selected === "切换工作 Profile") await handle("switch", ctx);
-			else if (selected === "应用 Catalog") await handle("apply", ctx);
-			else if (selected === "完整检查") await handle("doctor", ctx);
-			else if (selected === "恢复依赖") await handle("restore", ctx);
+			while (true) {
+				const inProfileRuntime = hasProfileRuntime();
+				const selected = await selectDetailed(ctx, "Harness 管理面", [
+					{ value: "status", label: "查看状态", description: "查看 Catalog、当前脚手架、依赖与投影概况" },
+					{ value: "instructions", label: "AGENTS.md 词条", description: "逐项启停 repository 词条、选择详略、预览和编辑源码" },
+					{ value: "skills", label: "Skills 目录", description: "搜索摘要并查看完整说明，不改变 Profile" },
+					{ value: "configure", label: "配置脚手架", description: "配置 Profile 词条、Skills 和推荐模型" },
+					{ value: "web", label: "打开 Web 编排", description: "横向比较并批量调整 Profile；使用同一 Catalog 与保存事务" },
+					{ value: "switch", label: inProfileRuntime ? "切换当前脚手架" : "启动其他脚手架", description: inProfileRuntime ? "热切换并重载隔离资源" : "完整资源切换需要退出后从启动边界选择" },
+					{ value: "apply", label: "应用 Catalog", description: "重新生成 adapter、修复受管投影并运行验收" },
+					{ value: "doctor", label: "完整检查", description: "只读检查生成物、依赖、密钥、运行时与投影" },
+					{ value: "restore", label: "恢复依赖", description: "委托固定版本的官方工具恢复缺失依赖" },
+					{ value: "back", label: "退出管理面", description: "返回 Pi 输入框" },
+				]);
+				if (!selected || selected === "back") return;
+				await handle(selected, ctx);
+			}
 		}
 	}
 
 	pi.registerCommand("harness", {
-		description: "用可视化开关管理跨 harness 的 Profile、投影与健康状态",
+		description: "管理 AGENTS.md 词条、三档脚手架、Skills、投影与健康状态",
 		getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
 			const [action = "", value = ""] = prefix.split(/\s+/, 2);
 			if (["switch", "configure", "edit"].includes(action)) {
