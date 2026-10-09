@@ -18,6 +18,8 @@ export function catalogArguments(args = process.argv.slice(2), env = process.env
   const rest = [];
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
+    // Everything after the launch command belongs to Pi, including '--' and prompt text.
+    if (arg === "pi" && rest.length === 0) { rest.push(...args.slice(index)); break; }
     if (arg === "--catalog-root" || arg.startsWith("--catalog-root=") || arg.startsWith("--catalog=")) {
       const value = arg === "--catalog-root" ? args[++index] : arg.slice(arg.indexOf("=") + 1);
       if (selected !== undefined || !value || value.startsWith("--")) throw new Error("Supply exactly one nonempty --catalog path");
@@ -51,7 +53,7 @@ export function assertCatalog(root = REPO) {
 
 /** Exact source of a native projection: executable assets belong to the engine, data to the Catalog. */
 export function projectionSource(path) {
-  if (path === "bin/harness" || (path.startsWith("adapters/pi/extensions/") && existsSync(join(ENGINE, path)))) return join(ENGINE, path);
+  if (path === "bin/harness" || path === "bin/pi-h" || (path.startsWith("adapters/pi/extensions/") && existsSync(join(ENGINE, path)))) return join(ENGINE, path);
   return join(REPO, path);
 }
 export const SKILLS_DIR = join(REPO, "skills");
@@ -154,6 +156,7 @@ export function staleManagedLinks() {
 export function managedLinks() {
   const links = [
     ["bin/harness", join(HOME, ".local/bin/harness")],
+    ["bin/pi-h", join(HOME, ".local/bin/pi-h")],
     ["AGENTS.md", join(HOME, "AGENTS.md")],
     ["AGENTS.md", join(HOME, ".pi/agent/AGENTS.md")],
     // Codex reads AGENTS.md natively and reads .agents/skills directly, so it

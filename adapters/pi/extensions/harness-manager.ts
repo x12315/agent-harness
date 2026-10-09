@@ -101,7 +101,7 @@ const HELP = `Harness Control Plane / Harness 管理面
 /harness skills                  浏览 Skill 完整说明
 /harness configure <name>        配置 Profile 词条、Skills 与推荐模型
 /harness web                     打开本地 Web 编排工作台
-/harness switch <name>           在 Profile 会话中热切换脚手架
+/harness switch <name>           在可切换会话中热切换工作方案
 /harness apply                   生成、投影并验收
 /harness doctor                  运行只读完整检查
 /harness restore                 通过官方工具恢复声明依赖
@@ -286,16 +286,32 @@ function compactOutput(stdout: string, stderr: string): string {
 }
 
 export default function harnessManager(pi: ExtensionAPI) {
-	function hasProfileRuntime(): boolean {
+	function profileRuntimePlan(): { profile: string; source?: string } | undefined {
 		const runtimeDir = process.env.PI_CODING_AGENT_DIR;
-		if (!runtimeDir || !pi.getCommands().some((command) => command.name === "profile")) return false;
+		if (!runtimeDir || !pi.getCommands().some((command) => command.name === "profile")) return undefined;
 		try {
 			const plan = JSON.parse(readFileSync(join(runtimeDir, "pi-profile.json"), "utf8"));
-			return typeof plan.profile === "string" && typeof plan.agentDir === "string";
+			return typeof plan.profile === "string" && typeof plan.agentDir === "string" ? plan : undefined;
 		} catch {
-			return false;
+			return undefined;
 		}
 	}
+
+	function hasProfileRuntime(): boolean {
+		return profileRuntimePlan() !== undefined;
+	}
+
+	pi.on("session_start", (_event, ctx) => {
+		if (!ctx.hasUI) return;
+		ctx.ui.setWidget("harness-profile-hint", undefined);
+		const plan = profileRuntimePlan();
+		if (plan?.profile !== "default" || plan.source !== "builtin") return;
+		ctx.ui.setStatus("profile", "普通模式 · 未选择工作方案");
+		ctx.ui.setWidget("harness-profile-hint", [
+			"Harness 已启用 · 尚未选择工作方案（当前使用普通 Pi 资源）",
+			"输入 /harness switch 打开方案选择，选好后在当前会话中生效。",
+		]);
+	});
 
 	async function runHarness(args: string[], ctx: ExtensionCommandContext, timeout = 600_000) {
 		ctx.ui.setStatus("harness-manager", `harness ${args.join(" ")}`);
@@ -464,8 +480,8 @@ export default function harnessManager(pi: ExtensionAPI) {
 		if (!hasProfileRuntime()) {
 			ctx.ui.notify([
 				"当前是普通 Pi 会话，不能在运行中安全替换启动时发现的 Skills、Extensions 与 Instructions。",
-				`要进入“${profileChoice(selected).label}”，请退出后运行：pi-profile ${selected}`,
-				"pi-profile 只建立隔离的 Pi 资源目录；进入会话后仍由 Pi 原生 extension 与 /harness 管理。",
+				`下次可直接运行 pi-h（或 harness pi），再用 /harness switch ${selected}，无需再次退出。`,
+				`也可直接运行：pi-profile ${selected}。这些入口只准备资源，交互仍由原生 Pi 执行。`,
 			].join("\n\n"), "warning");
 			return;
 		}

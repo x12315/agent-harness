@@ -9,7 +9,7 @@ const tests = [
 	{
 		name: "catalog state",
 		command: process.execPath,
-		args: ["--test", join(REPO, "scripts/tests/catalog.test.mjs"), join(REPO, "scripts/tests/check-runner.test.mjs"), join(REPO, "scripts/tests/benchmark-metrics.test.mjs"), join(REPO, "scripts/tests/catalog-contract.test.mjs")],
+		args: ["--test", join(REPO, "scripts/tests/catalog.test.mjs"), join(REPO, "scripts/tests/check-runner.test.mjs"), join(REPO, "scripts/tests/benchmark-metrics.test.mjs"), join(REPO, "scripts/tests/catalog-contract.test.mjs"), join(REPO, "scripts/tests/pi-launcher.test.mjs")],
 	},
 	{
 		name: "Web HTTP + transactions",
@@ -20,6 +20,11 @@ const tests = [
 		name: "Web browser syntax",
 		command: process.execPath,
 		args: ["--check", join(REPO, "web/app.js")],
+	},
+	{
+		name: "Pi launcher RPC",
+		command: process.execPath,
+		args: [join(REPO, "scripts/tests/pi-launcher-rpc.mjs")],
 	},
 	{
 		name: "RPC interaction",

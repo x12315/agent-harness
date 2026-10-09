@@ -27,6 +27,7 @@ harness --catalog=/path/to/catalog doctor
 
 | 命令 | 用途 |
 | --- | --- |
+| `pi-h` / `harness pi [Pi arguments]` | 启动可热切换的普通 Pi，进入后用 `/harness switch` 选择方案 |
 | `harness web` / Pi `/harness web` | 方案新建、复制、编辑、删除、预览与审阅 |
 | Pi `/harness` | 无服务的人工 TUI 管理 |
 | `harness profile list\|show\|path <id>` | 查看 Catalog 声明 |
@@ -41,6 +42,29 @@ harness --catalog=/path/to/catalog doctor
 | `harness benchmark` | 完整 doctor 多轮性能验收与版本比较 |
 
 Pi/Codex 仍拥有自己的运行进程与交互循环。通过 `pi-profile <id>` 或 `codex -p <id>` 选择完整工作组合；`harness run` 是脚本化别名。人工控制面不注册为模型工具，也不受 Profile 工作工具权限约束。子 Agent 工具只能取父子 allowlist 的交集。
+
+### 在项目目录启动 Pi
+
+完成 compose、bootstrap 与依赖恢复后，将 `~/.local/bin` 加入 PATH：
+
+```bash
+cd /path/to/project
+pi-h                         # 等价于 harness pi
+# Pi 内：/harness switch medium（或 /harness switch 打开选择）
+# 需要重新进入普通模式时，退出后再次运行 pi-h
+pi-h --model provider/model --thinking high
+pi-h --continue              # 原生 Pi 的会话续接参数
+```
+
+入口显式启动上游内置 `default`，不恢复上次保存的方案，也不把 default 写成最后选择；它保留本机普通资源、模型默认值、scope 和主题，不强迫先选方案。启动后页脚显示「普通模式 · 未选择工作方案」，输入框上方提示用 `/harness switch` 选择；选定工作方案后提示消失，页脚显示已启用的方案。`default` 是上游普通资源模式的内部名称，不是 Catalog 的默认工作方案。之后的资源准备、热切换、reload、会话和 Agent 循环由固定版本的 `pi-profile-switch` 与原生 Pi 执行。人工 `/harness` 被显式加载一次，即使使用 `--no-extensions` 关闭自动发现也保留管理入口。
+
+Pi 参数（含 `--`、提示词、stdin/stdio、退出码和 SIGINT/SIGTERM）直接透传。`harness --catalog=/path pi ...` 的 Catalog 选择必须在 `pi` 前；`pi-h` 使用环境或已激活的 Catalog。投影或版本不符时停止，不自动 bootstrap、安装或改用户设置。已有 `PI_CODING_AGENT_DIR` 时拒绝嵌套启动，请从外部终端运行或在会话内热切换。直接指定方案仍用 `pi-profile <id>` / `harness run pi <id>`；`pi-h medium` 是 Pi 提示词，不是方案参数。
+
+此入口用于会话启动；安装、认证、配置等管理命令仍使用原生 `pi`。上游会从任意位置（包括 `--` 后的提示词和参数值）提取 `--approve` / `-a` / `--no-approve` / `-na`；新入口明确拒绝这四个独立参数，避免把文本变成审批，不改写或模拟用户的信任决策。有此需求请明确使用原生 `pi`。
+
+原生 `pi` 完全保留；`pi -h` 仍是帮助，`pi harness` 不被劫持成子命令。已经打开的普通 Pi 不会被自动重启或接管；下次从新入口启动即可。
+
+**上游边界：** 普通模式要求原生 settings 排除 `profile-config`（模板已声明）；命名方案仍被 `pi-profile-switch@0.11.0` 强制加入该 Skill，新入口未解决此限制。不要用它改 adapter 生成物，配置仍走 `/harness`。上游从零工具方案 `/profile use default` 未恢复普通基础工具；因此 `/harness switch` 只支持 Catalog 工作方案，重新进入普通模式用新的 `pi-h` 会话。显式 `--extension` / `--skill` 按 Pi 原生规则添加资源；工具 allowlist 不等于系统级沙箱。
 
 ## 边界与契约
 
@@ -63,7 +87,7 @@ harness doctor
 git diff --check
 ```
 
-快速控制面回路包括纯状态、独立 Catalog 接口、HTTP/事务、RPC 和真实 TUI。夹具是 synthetic，不复制个人清单或认证。完整 doctor 另验实际安装、发现、adapter 契约、工具边界、依赖与投影；`--json` 不会跳过任何 gate。未安装的 harness 有显式 skip，不能据此声称其运行时验证过。
+快速控制面回路包括纯状态、独立 Catalog 接口、HTTP/事务、启动参数/信号、真实启动热切换 RPC、人工管理 RPC 和真实 TUI。夹具是 synthetic，不复制个人清单或认证。完整 doctor 另验实际安装、发现、adapter 契约、工具边界、依赖与投影；`--json` 不会跳过任何 gate。未安装的 harness 有显式 skip，不能据此声称其运行时验证过。
 
 发布版本或修改检查执行路径时，遵循 [性能回归验收](docs/performance.md)：至少各三轮、保留覆盖与两仓源码身份、按显式预算比较历史报告，无法比较或实测时记录原因。功能验收与性能指标一起留档。
 

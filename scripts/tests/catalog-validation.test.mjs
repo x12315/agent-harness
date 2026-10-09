@@ -69,7 +69,7 @@ function realVerifierFixture(root) {
 	cpSync(new URL("../../adapters/pi/extensions/subagent/tool-policy.mjs", import.meta.url), join(root, "adapters/pi/extensions/subagent/tool-policy.mjs"));
 	mkdirSync(join(root, "bin"));
 	mkdirSync(join(root, "adapters/codex"), { recursive: true });
-	writeFileSync(join(root, "bin/harness"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+	for (const entry of ["harness", "pi-h"]) writeFileSync(join(root, "bin", entry), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 	writeFileSync(join(root, "adapters/codex/AGENTS.md"), "Fixture Codex entry\n");
 	writeFileSync(join(root, "adapters/pi/settings.json"), '{"packages":[],"skills":[]}');
 	const env = { ...process.env, HOME: join(root, "native-home"), HARNESS_CATALOG: root, PATH: `${join(root, "bin")}:${process.env.PATH}` };

@@ -58,7 +58,7 @@ export function nextSteps() {return [];}`);
     writeFileSync(join(root, "scripts/verify.mjs"), `import { appendFileSync } from 'node:fs';
 export function verificationOptions() {return {};}
 export async function run(options) {await new Promise(r=>setTimeout(r,20));appendFileSync('calls.jsonl',JSON.stringify({name:'verify',options})+'\\n');return 7;}`);
-    writeFileSync(join(root, "scripts/manage.mjs"), "export const editProfile=()=>0,help=()=>0,runProfile=()=>0,showProfilePath=()=>0,showProfiles=()=>0,showStatus=()=>0;");
+    writeFileSync(join(root, "scripts/manage.mjs"), "export const editProfile=()=>0,help=()=>0,runPi=()=>0,runProfile=()=>0,showProfilePath=()=>0,showProfiles=()=>0,showStatus=()=>0;");
     const trace = join(root, "calls.jsonl");
     for (const args of [["doctor"], ["doctor", "--json"], ["doctor", "--serial"], ["apply"], ["all", "--apply"]]) {
       writeFileSync(trace, "");
