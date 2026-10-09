@@ -1,0 +1,4 @@
+#!/usr/bin/env node
+// Native Pi with Harness startup preparation; leave the original pi executable untouched.
+process.argv.splice(2, 0, "pi");
+await import("../scripts/harness.mjs");

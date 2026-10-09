@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /** Human-facing management operations for the harness catalog. */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { compose, inspect } from "./compose.mjs";
-import { ENGINE, HOME, REPO, classify, isInsideRepo, isSymlink, managedLinks, pins, projectionSource } from "./lib/repo.mjs";
+import { ENGINE, HOME, REPO, LOCAL_PI_SETTINGS, PI_PROFILE_CONFIG_SKILL, assertCatalog, classify, isInsideRepo, isSymlink, managedLinks, pins, projectionSource } from "./lib/repo.mjs";
 
 const have = (command) => spawnSync("sh", ["-c", `command -v ${command}`], { encoding: "utf8" }).status === 0;
 
@@ -113,6 +113,7 @@ export function showStatus({ json = false } = {}) {
   if (report.skills.unregistered.length) console.log(`\n  unregistered skills: ${report.skills.unregistered.join(", ")}`);
   console.log("\n常用操作");
   console.log("  harness profile list|show <name>|edit <name>");
+  console.log("  pi-h / harness pi [Pi arguments]    # switch-ready ordinary Pi");
   console.log("  harness run <pi|codex> <profile>");
   console.log("  harness apply    # compose, project, and verify");
   console.log("  harness doctor   # read-only full verification");
@@ -138,6 +139,45 @@ export function editProfile(name) {
     return 1;
   }
   return result.status ?? 1;
+}
+
+/** Launch switch-ready ordinary Pi; native Pi arguments, cwd and exit status are preserved. No Catalog or user settings are rewritten. */
+export async function runPi(piArgs = []) {
+  try {
+    assertCatalog();
+    // The pinned launcher extracts these even from literal prompts after '--'. Never reinterpret user text as trust approval.
+    if (piArgs.some(arg => ["--approve", "-a", "--no-approve", "-na"].includes(arg))) throw new Error("trust arguments are not supported by pi-h because the upstream launcher reinterprets them; use native pi explicitly");
+    if (process.env.PI_CODING_AGENT_DIR) throw new Error("start pi-h from an external terminal; use /harness switch inside Pi");
+    if (process.env.PI_PROFILE_SWITCH_DIR?.trim() && realpathSync(resolve(process.env.PI_PROFILE_SWITCH_DIR.trim())) !== realpathSync(join(HOME, ".pi-profile-switch"))) throw new Error("PI_PROFILE_SWITCH_DIR differs from the managed native workspace");
+    if (!have("pi-profile")) throw new Error("pi-profile is not installed; run harness restore --apply");
+    if (installedGlobalPackageVersion("pi-profile-switch") !== pins().piProfileSwitch) throw new Error("pi-profile-switch version differs from the declared pin; run harness restore --apply");
+    for (const [source, target] of [
+      [join(ENGINE, "adapters/pi/extensions/harness-manager.ts"), join(HOME, ".pi/agent/extensions/harness-manager.ts")],
+      [join(REPO, "adapters/pi/profiles"), join(HOME, ".pi-profile-switch/profiles")],
+      [join(REPO, "AGENTS.md"), join(HOME, ".pi/agent/AGENTS.md")],
+    ]) {
+      if (!isSymlink(target) || realpathSync(target) !== realpathSync(source)) throw new Error("Pi projections do not match this Engine/Catalog; run harness bootstrap --apply explicitly");
+    }
+    const settings = JSON.parse(readFileSync(LOCAL_PI_SETTINGS, "utf8"));
+    if (!Array.isArray(settings.skills) || !settings.skills.includes(`-${PI_PROFILE_CONFIG_SKILL}`)) throw new Error("ordinary Pi must exclude profile-config in its native settings before using pi-h");
+    const child = spawn("pi-profile", ["default", "--", "--extension", join(HOME, ".pi/agent/extensions/harness-manager.ts"), ...piArgs], { stdio: "inherit", env: { ...process.env, HARNESS_CATALOG: REPO } });
+    const interrupt = () => child.kill("SIGINT");
+    const terminate = () => child.kill("SIGTERM");
+    process.on("SIGINT", interrupt);
+    process.on("SIGTERM", terminate);
+    try {
+      return await new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", (code, signal) => resolve(code ?? (signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1)));
+      });
+    } finally {
+      process.off("SIGINT", interrupt);
+      process.off("SIGTERM", terminate);
+    }
+  } catch (error) {
+    console.error(`pi-h: ${error.message}`);
+    return 1;
+  }
 }
 
 export function runProfile(harness, profileName, extraArgs = []) {
@@ -187,6 +227,7 @@ Usage:
   harness profile show <name>          Inspect one profile
   harness profile edit <name>          Edit source, then apply and verify
   harness profile path <name>          Print the source file path
+  pi-h / harness pi [pi args...]      Launch switch-ready ordinary Pi
   harness run pi <name> [pi args...]   Launch Pi through the profile runtime
   harness run codex <name> [args...]   Launch Codex with its native profile
   harness web                          Open the local composition workbench

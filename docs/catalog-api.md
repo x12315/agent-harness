@@ -37,6 +37,8 @@ Pi 全局规则通过 Catalog AGENTS 投影发现；Codex 每个 Profile 的 `de
 
 使用 `harness --catalog=<path> <command>`。`status --json` 返回 `ok`、`engine`、`catalog`、`interfaceVersion: 1`、两仓 Git 状态、资源与投影统计。数据源与执行源始终不同：保存、检查、Web 静态文件、worker、runtime 探针来自 Engine，读写目标属于指定 Catalog。
 
+`harness [--catalog=<path>] pi [Pi arguments]` 与 `pi-h` 启动可切换的普通 Pi。`pi` 后的参数是原生 Pi 输入，不再解析 Catalog 选择；新入口只接受已激活的匹配投影，不自动改 HOME 或声明。启动不保存默认方案选择，仍复用固定版本上游 runtime；详细行为与边界见 Engine README。
+
 Web API（仅 loopback、临时授权、同源检查）：
 
 - `GET /api/catalog`：资源、源码 SHA-256、模型 scope；不返回凭据。
@@ -49,7 +51,7 @@ Web API（仅 loopback、临时授权、同源检查）：
 
 ## 投影归属
 
-CLI、内置扩展 → Engine 的精确文件；AGENTS、Profile、个人 agents/prompts/扩展 → Catalog 的精确源。doctor 校验真实路径与声明源相等，不只检查“某个仓库下”。实体冲突交给人，bootstrap 不覆盖实体；已受管 symlink 可修复，包括拆分后悬空的旧入口。
+CLI（`harness`、`pi-h`）、内置扩展 → Engine 的精确文件；AGENTS、Profile、个人 agents/prompts/扩展 → Catalog 的精确源。doctor 校验真实路径与声明源相等，不只检查“某个仓库下”。实体冲突交给人，bootstrap 不覆盖实体；已受管 symlink 可修复，包括拆分后悬空的旧入口。
 
 只激活一份 HOME 投影。多份 Catalog 的 API 保存互不写对方；需要同时验证原生启动时使用独立 HOME。认证、会话、npm 安装、主题、普通默认模型、最后选择均在原生目录，不属于任何仓。
 

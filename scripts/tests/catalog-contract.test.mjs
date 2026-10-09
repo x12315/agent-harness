@@ -53,7 +53,7 @@ test("One engine manages independent data-only Catalogs and never executes their
       const activeEnv={...env};delete activeEnv.HARNESS_CATALOG;delete activeEnv.HARNESS_REPO;
       const active=execFileSync(process.execPath,["--input-type=module","-e",`import {CATALOG} from ${JSON.stringify(new URL("../lib/repo.mjs",import.meta.url).href)};console.log(CATALOG);`],{env:activeEnv,encoding:"utf8"}).trim();
       assert.equal(active,realpathSync(root),"native TUI/CLI must find the activated Catalog without retaining CLI flags");
-      assert.equal(realpathSync(join(root,"native-home/.local/bin/harness")),join(ENGINE,"bin/harness"));
+      for (const entry of ["harness", "pi-h"]) assert.equal(realpathSync(join(root, "native-home/.local/bin", entry)), join(ENGINE, "bin", entry));
       assert.equal(realpathSync(join(root,"native-home/.pi/agent/AGENTS.md")),realpathSync(join(root,"AGENTS.md")));
       assert.equal(realpathSync(join(root,"native-home/.pi/agent/extensions/harness-manager.ts")),join(ENGINE,"adapters/pi/extensions/harness-manager.ts"));
       assert.ok(readFileSync(join(root,"adapters/codex/profiles/medium.config.toml"),"utf8").includes("Standard Safety."),"Codex core rules must not depend on a user's pointer phrase");

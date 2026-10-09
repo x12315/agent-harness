@@ -6,6 +6,7 @@
  *
  *   status      show the human-facing control plane (default)
  *   profile     list/show/edit declared profiles
+ *   pi          launch switch-ready ordinary Pi with native arguments
  *   run         launch Pi or Codex with a declared profile
  *   web         open the local Harness composition workbench
  *   apply       compose, project, and verify
@@ -35,7 +36,7 @@ import { run as reconcile } from "./reconcile.mjs";
 import { run as secretScan } from "./secret-scan.mjs";
 import { run as restore } from "./restore.mjs";
 import { run as verify, verificationOptions } from "./verify.mjs";
-import { editProfile, help, runProfile, showProfilePath, showProfiles, showStatus } from "./manage.mjs";
+import { editProfile, help, runPi, runProfile, showProfilePath, showProfiles, showStatus } from "./manage.mjs";
 
 import { CATALOG, catalogArguments } from "./lib/repo.mjs";
 const argv = catalogArguments().args;
@@ -80,6 +81,8 @@ if (command === "status") {
     // Backward-compatible shorthand: `harness profile review`.
     code = showProfiles(action, options);
   }
+} else if (command === "pi") {
+  code = await runPi(argv.slice(1));
 } else if (command === "run") {
   code = runProfile(argv[1], argv[2], argv.slice(3));
 } else if (command === "web") {
