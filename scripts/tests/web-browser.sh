@@ -104,7 +104,7 @@ check 'if([...document.querySelectorAll("[data-action=global-toggle][data-id^=ma
 ab click '[data-route="skills"]'
 ab fill '[data-action="catalog-skill-search"]' 'lark-base'
 ab click '[data-action="inspect-skill"][data-name="lark-base"]'
-check 'if(!document.querySelector("#inspector").textContent.includes("Workspace"))throw Error("full description truncated"); "full skill description"'
+check 'if(!document.querySelector("#inspector").textContent.includes("FULL-SKILL-DESCRIPTION-END"))throw Error("full description truncated"); "full skill description"'
 audit skills
 ab click '#main [data-route="profile/medium"][data-section="skills"]'
 check 'if(document.activeElement.id!=="section-skills")throw Error("Skill configuration shortcut failed"); "Skill directory opens editable settings"'

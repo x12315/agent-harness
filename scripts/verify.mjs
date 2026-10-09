@@ -481,17 +481,17 @@ function checkHygiene() {
     if (existsSync(join(ENGINE, path))) problems.push(`Engine contains personal Catalog content: ${path}`);
   }
   for (const root of new Set([ENGINE, REPO])) {
-  const r = spawnSync("git", ["-C", root, "ls-files", "-s"], { encoding: "utf8" });
-  if (r.status !== 0) { problems.push(`source is not a Git checkout: ${root}`); continue; }
-  for (const line of (r.stdout ?? "").split("\n")) {
-    if (!line.trim()) continue;
-    const [meta, path] = line.split("\t");
-    if ((meta ?? "").startsWith("120000")) problems.push(`committed symlink: ${path}`);
-    if (path.includes("node_modules/")) problems.push(`node_modules tracked: ${path}`);
-    if (/(^|\/)(auth|credential|credentials|token|tokens|secret|secrets)\.(json|ya?ml|txt)$/i.test(path) || /\.(pem|key)$/i.test(path)) {
-      problems.push(`possible secret: ${path}`);
+    const r = spawnSync("git", ["-C", root, "ls-files", "-s"], { encoding: "utf8" });
+    if (r.status !== 0) { problems.push(`source is not a Git checkout: ${root}`); continue; }
+    for (const line of (r.stdout ?? "").split("\n")) {
+      if (!line.trim()) continue;
+      const [meta, path] = line.split("\t");
+      if ((meta ?? "").startsWith("120000")) problems.push(`committed symlink: ${root}/${path}`);
+      if (path.includes("node_modules/")) problems.push(`node_modules tracked: ${root}/${path}`);
+      if (/(^|\/)(auth|credential|credentials|token|tokens|secret|secrets)\.(json|ya?ml|txt)$/i.test(path) || /\.(pem|key)$/i.test(path)) {
+        problems.push(`possible secret: ${root}/${path}`);
+      }
     }
-  }
   }
   return {
     name: "repo hygiene",

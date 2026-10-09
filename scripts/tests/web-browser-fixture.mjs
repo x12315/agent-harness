@@ -16,7 +16,8 @@ for (const name of ["heavy", "medium", "ultralight"]) {
 const skills = ["long-skill", "short-skill", "lark-base", "lark-doc", "find-skills", "git-commit"];
 for (const name of skills.slice(2)) {
 	mkdirSync(join(root, "skills", name), { recursive: true });
-	writeFileSync(join(root, "skills", name, "SKILL.md"), `---\nname: ${name}\ndescription: Synthetic ${name} browser fixture; use only for UI tests.\n---\n\n# Synthetic ${name}\n`);
+	const description = name === "lark-base" ? `${"Synthetic long browser fixture description. ".repeat(20)}FULL-SKILL-DESCRIPTION-END` : `Synthetic ${name} browser fixture; use only for UI tests.`;
+	writeFileSync(join(root, "skills", name, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n\n# Synthetic ${name}\n`);
 }
 writeFileSync(join(root, ".gitignore"), skills.map((name) => `!/skills/${name}/`).join("\n"));
 const models = ["gpt-heavy", "gpt-medium", "gpt-ultralight", "gpt-6.1-sol"].map((id) => ({
