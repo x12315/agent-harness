@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyCatalogJson as saveJson, applyCatalogMarkdown as saveMarkdown, createCatalogProfile as createProfile, deleteCatalogProfile as deleteProfile, runCatalogDoctor as doctor } from "../lib/catalog-transaction.mjs";
 const applyCatalogJson = (options) => saveJson({ engine: options.repo, ...options });
@@ -8,7 +8,8 @@ const applyCatalogMarkdown = (options) => saveMarkdown({ engine: options.repo, .
 const createCatalogProfile = (options) => createProfile({ engine: options.repo, ...options });
 const deleteCatalogProfile = (options) => deleteProfile({ engine: options.repo, ...options });
 const runCatalogDoctor = (root) => doctor(root, root);
-import { hashText, parsePiModelList, parseSkillDescription, readCatalog } from "../lib/web-catalog.mjs";
+import { hashText, parsePiModelList, parsePiPackageList, parseSkillDescription, readCatalog } from "../lib/web-catalog.mjs";
+import { parsePiResourceProbe, startHarnessWeb } from "../web.mjs";
 import { createWebFixture, MODEL_OUTPUT } from "./web-fixture.mjs";
 
 test("Skill frontmatter keeps folded long descriptions available", () => {
@@ -36,6 +37,8 @@ test("Web catalogue exposes profiles, full Skill descriptions, instructions, and
 		assert.match(catalog.skills.find((skill) => skill.name === "long-skill").description, /Long skill description/);
 		assert.equal(catalog.instructions.length, 4);
 		assert.ok(catalog.piExtensions.includes("bookmark") && catalog.piExtensions.includes("subagent"), "available extensions must not depend on any Profile enabling them");
+		assert.equal(catalog.piExtensionDetails.find((entry) => entry.name === "harness-manager").required, true);
+		assert.equal(catalog.piExtensionDetails.find((entry) => entry.name === "harness-manager").available, true);
 		assert.equal(catalog.modelScope, "session");
 		assert.equal(catalog.models.length, 1, "declared models must not escape session scope");
 		assert.equal(catalog.models.find((model) => model.id === "gpt-medium").scopeThinking, "medium");
@@ -43,6 +46,251 @@ test("Web catalogue exposes profiles, full Skill descriptions, instructions, and
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("Pi package lists preserve declared paths, deduplicate, and never guess missing installations", () => {
+	assert.deepEqual(parsePiPackageList("\u001b[1mUser packages:\u001b[0m\n  npm:@scope/tools@1.2.3 (filtered)\n    /installed/tools\n  npm:missing@1\n\nProject packages:\n  npm:@scope/tools@1.2.3\n    /installed/tools\n  npm:relative\n    relative/path\n"), [
+		{ source: "npm:@scope/tools@1.2.3", path: "/installed/tools" },
+		{ source: "npm:missing@1" }, { source: "npm:relative" },
+	]);
+	assert.deepEqual(parsePiPackageList("No packages installed.\n"), []);
+});
+
+function fixturePackage(root, directory, manifest) {
+	const path = join(root, "packages", directory);
+	mkdirSync(path, { recursive: true });
+	writeFileSync(join(path, "package.json"), JSON.stringify(manifest));
+	return path;
+}
+
+function declarePiResources(root, extensions, tools) {
+	const path = join(root, "profiles/medium.json");
+	const value = JSON.parse(readFileSync(path, "utf8"));
+	value.adapters.pi.extensions = ["harness-manager", ...extensions];
+	value.adapters.pi.tools = tools;
+	writeFileSync(path, JSON.stringify(value));
+}
+
+async function fetchCatalog(instance) {
+	const response = await fetch(`${instance.origin}/api/catalog`, { headers: { cookie: `harness_web_${instance.server.address().port}=${instance.token}` } });
+	assert.equal(response.status, 200);
+	return response.json();
+}
+
+test("Native packages preserve exact selectable scoped names and stay visible without enabled Profiles", () => {
+	const root = createWebFixture();
+	try {
+		const privateData = "PRIVATE-MANIFEST-DATA";
+		const path = fixturePackage(root, "scoped", { name: "@scope/unused", description: "An installed event-only extension", version: "1.2.3", pi: { extensions: ["index.ts"], privateData }, scripts: { secret: privateData }, auth: privateData });
+		writeFileSync(join(path, "index.ts"), "throw new Error('must not execute package code');\n");
+		const catalog = readCatalog(root, { engine: root, piResources: { packages: [{ source: "npm:@scope/unused@1.2.3", path }] } });
+		assert.ok(catalog.piExtensions.includes("@scope/unused"));
+		assert.equal(catalog.piExtensions.includes("unused"), false);
+		const extension = catalog.piExtensionDetails.find((entry) => entry.name === "@scope/unused");
+		assert.equal(extension.description, "An installed event-only extension");
+		assert.equal(extension.source, "npm:@scope/unused@1.2.3");
+		assert.equal(extension.version, "1.2.3");
+		assert.equal(extension.available, true);
+		assert.deepEqual(extension.commands, []);
+		assert.deepEqual(extension.tools, []);
+		assert.equal(catalog.piExtensionDetails.find((entry) => entry.name === "bookmark").available, true, "event-only Catalog files need no registered tool/command");
+		assert.equal(JSON.stringify(catalog).includes(privateData), false);
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const protocol of ["https", "ssh", "git+ssh"])
+test(`Authenticated ${protocol} package sources never escape public JSON, without weakening exact association`, async () => {
+	const root = createWebFixture();
+	const secrets = ["PRIVATE-URL-USER", "PRIVATE%2DURL%2DPASS", "PRIVATE-URL-PASS", "PRIVATE-URL-QUERY", "PRIVATE-URL-FRAGMENT"];
+	const source = `git:${protocol}://${secrets[0]}:${secrets[1]}@example.com/org/pkg.git@v1?token=${secrets[3]}#${secrets[4]}`;
+	try {
+		const path = fixturePackage(root, "private", { name: "@scope/private", description: `From ${source}`, pi: { extensions: [] } });
+		writeFileSync(join(path, "index.ts"), "// Metadata only; never imported.\n");
+		const sourceInfo = { path: join(path, "index.ts"), source, origin: "package", scope: "user" };
+		const resources = {
+			packages: parsePiPackageList(`User packages:\n  ${source}\n    ${path}\n  ${source.replace("pkg.git", "unresolved.git")}\n`),
+			tools: [{ name: "private-lookup", description: `From ${source}`, parameters: { type: "object", properties: { id: { type: "string", description: `See ${source}` } } }, sourceInfo }],
+			commands: [{ name: "private-command", source: "extension", sourceInfo }],
+		};
+		const original = structuredClone(resources);
+		const instance = await startHarnessWeb({ repo: root, engine: root, models: [], piResources: resources });
+		try {
+			const catalog = await fetchCatalog(instance);
+			for (const secret of secrets) assert.equal(JSON.stringify(catalog).includes(secret), false, `public JSON leaked ${secret}`);
+			const extension = catalog.piExtensionDetails.find(entry => entry.name === "@scope/private");
+			assert.equal(extension.source, `git:${protocol}://example.com/org/pkg.git@v1`);
+			assert.equal(extension.sourceRedacted, true, "display source must not become an installation identity");
+			assert.equal(extension.available, true, "exact raw source/path must still match the registered tool");
+			assert.deepEqual(extension.tools, ["private-lookup"]);
+			assert.deepEqual(extension.commands, ["private-command"]);
+			assert.equal(catalog.piTools.find(entry => entry.name === "private-lookup").source.source, extension.source);
+		} finally { instance.server.close(); await instance.closed; }
+		assert.deepEqual(resources, original, "redaction must not rewrite internal identities");
+		const mismatch = readCatalog(root, { engine: root, piResources: { ...resources,
+			tools: resources.tools.map(tool => ({ ...tool, sourceInfo: { ...sourceInfo, source: source.replace(secrets[0], "OTHER-USER") } })), commands: [],
+		} });
+		assert.equal(mismatch.piExtensionDetails.find(entry => entry.name === "@scope/private").available, false, "equal redacted URLs are not proof of equal package identities");
+		for (const secret of secrets) assert.equal(JSON.stringify(mismatch).includes(secret), false);
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Resource union preserves missing declarations and the required manager without pretending tools load extensions", () => {
+	const root = createWebFixture();
+	try {
+		declarePiResources(root, ["missing-extension", "same-as-tool", "installed-tool"], ["missing-tool", "registered"]);
+		const catalog = readCatalog(root, { engine: root, piResources: {
+			packages: [{ source: "npm:missing-package", path: join(root, "not-installed") }],
+			tools: [{ name: "same-as-tool", description: "Actual tool", sourceInfo: { source: "auto", origin: "top-level", path: join(root, "native/installed-tool.ts") } }],
+		} });
+		for (const name of ["missing-extension", "same-as-tool", "missing-package", "harness-manager"]) {
+			assert.ok(catalog.piExtensions.includes(name));
+			assert.equal(catalog.piExtensionDetails.find((entry) => entry.name === name).available, false);
+		}
+		assert.equal(catalog.piExtensionDetails.find((entry) => entry.name === "harness-manager").required, true);
+		assert.equal(catalog.piExtensionDetails.find((entry) => entry.name === "installed-tool").available, true);
+		assert.equal(catalog.piTools.find((entry) => entry.name === "missing-tool").available, false);
+		assert.match(catalog.piTools.find((entry) => entry.name === "missing-tool").description, /未.*发现/);
+		assert.equal(catalog.piTools.find((entry) => entry.name === "registered").available, false);
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Registered tool documentation and source associations are public, distinct from Profile activation", () => {
+	const root = createWebFixture();
+	try {
+		const privateData = "PRIVATE-SOURCE-DATA";
+		const path = fixturePackage(root, "tools", { name: "@scope/tools", description: "Package tools", pi: { extensions: ["index.ts"] } });
+		writeFileSync(join(path, "index.ts"), "// Fixture resource metadata only.\n");
+		const sourceInfo = { path: join(path, "index.ts"), source: "npm:@scope/tools", origin: "package", scope: "user", auth: privateData, baseDir: privateData };
+		const catalog = readCatalog(root, { engine: root, piResources: {
+			settings: { token: privateData }, auth: privateData,
+			packages: [{ source: "npm:@scope/tools", path }],
+			tools: [{ name: "lookup", description: "Read a record", parameters: { type: "object", properties: { id: { type: "string", description: "Record identifier", default: privateData, examples: [privateData] } }, required: ["id"], privateData }, sourceInfo, annotations: { readOnlyHint: true }, execute: privateData }],
+			commands: [{ name: "lookup-settings", description: "Settings", source: "extension", sourceInfo }, { name: "not-an-extension", source: "prompt", sourceInfo }],
+		} });
+		const tool = catalog.piTools.find((entry) => entry.name === "lookup");
+		assert.equal(tool.description, "Read a record");
+		assert.deepEqual(tool.parameters, { type: "object", required: ["id"], properties: { id: { type: "string", description: "Record identifier" } } });
+		assert.deepEqual(tool.source, { path: join(path, "index.ts"), source: "npm:@scope/tools", origin: "package", scope: "user" });
+		assert.equal(tool.risk, "read-only");
+		const extension = catalog.piExtensionDetails.find((entry) => entry.name === "@scope/tools");
+		assert.deepEqual(extension.commands, ["lookup-settings"]);
+		assert.deepEqual(extension.tools, ["lookup"]);
+		assert.equal(JSON.stringify(catalog).includes(privateData), false);
+		for (const name of ["read", "bash", "edit", "write", "grep", "find", "ls"]) {
+			const builtin = catalog.piTools.find((entry) => entry.name === name);
+			assert.ok(builtin.description && builtin.category && builtin.risk && builtin.parameters.properties);
+		}
+		assert.equal(catalog.piTools.find((entry) => entry.name === "edit").parameters.properties.edits.items.properties.oldText.type, "string");
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Exact duplicate packages are harmless; conflicting sources for one exact package name are unavailable", () => {
+	const root = createWebFixture();
+	try {
+		const path = fixturePackage(root, "first", { name: "@one/shared", pi: { extensions: ["index.ts"] } });
+		const duplicate = { source: "npm:@one/shared", path };
+		const catalog = readCatalog(root, { engine: root, piResources: { packages: [duplicate, duplicate] } });
+		assert.equal(catalog.piExtensionDetails.filter((entry) => entry.name === "@one/shared").length, 1);
+		assert.equal(catalog.piExtensionDetails.find((entry) => entry.name === "@one/shared").available, true);
+		const second = fixturePackage(root, "second", { name: "@one/shared", pi: { extensions: ["index.ts"] } });
+		const conflict = readCatalog(root, { engine: root, piResources: { packages: [duplicate, { source: "npm:@two/shared", path: second }] } });
+		assert.equal(conflict.piExtensionDetails.find((entry) => entry.name === "@one/shared").available, false);
+		assert.match(conflict.piResourceWarning, /冲突/);
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Builtin registry commands are not advertised as selectable extensions", () => {
+	const root = createWebFixture();
+	try {
+		const sourceInfo = { path: "builtin:mcp", source: "builtin", origin: "top-level", scope: "temporary" };
+		const catalog = readCatalog(root, { engine: root, piResources: {
+			tools: [{ name: "tool_search", description: "Find registered tools", sourceInfo: { ...sourceInfo, path: "builtin:tool-search" } }],
+			commands: [{ name: "mcp", source: "extension", sourceInfo }],
+		} });
+		assert.ok(catalog.piTools.some((entry) => entry.name === "tool_search"));
+		assert.equal(catalog.piTools.find((entry) => entry.name === "tool_search").category, "Pi 内置");
+		assert.equal(catalog.piExtensions.some((name) => name.startsWith("builtin:")), false);
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Resource probe failure is explicit and does not return raw private diagnostics", () => {
+	const root = createWebFixture();
+	try {
+		const privateData = "PRIVATE-DIAGNOSTIC-DATA";
+		for (const result of [{ status: 0, stdout: "not metadata" }, { status: null, error: new Error(privateData), stdout: "", stderr: privateData }]) {
+			const resources = parsePiResourceProbe(result);
+			assert.ok(resources.warning);
+			assert.deepEqual(resources.tools, []);
+			const catalog = readCatalog(root, { engine: root, piResources: resources });
+			assert.match(catalog.piResourceWarning, /探针失败/);
+			assert.equal(JSON.stringify(catalog).includes(privateData), false);
+			assert.equal(catalog.piTools.find((entry) => entry.name === "read").available, true);
+		}
+		const envelope = { type: "harness-web-resources", models: [], tools: [], commands: [] };
+		const stdout = JSON.stringify({ type: "extension_ui_request", method: "notify", message: JSON.stringify(envelope) });
+		assert.equal(parsePiResourceProbe({ status: 0, stdout }).warning, undefined);
+		assert.ok(parsePiResourceProbe({ status: 1, stdout }).warning);
+		const restricted = JSON.stringify({ type: "extension_ui_request", method: "notify", message: JSON.stringify({ ...envelope, warning: "tool registry unavailable" }) });
+		assert.ok(parsePiResourceProbe({ status: 0, stdout: restricted }).warning);
+		const failed = `${stdout}\n${JSON.stringify({ type: "response", success: false, error: privateData })}`;
+		assert.ok(parsePiResourceProbe({ status: 0, stdout: failed }).warning);
+		assert.equal(JSON.stringify(parsePiResourceProbe({ status: 0, stdout: failed })).includes(privateData), false);
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Web synthetic model/resource inputs never invoke native Pi or inherit its packages", async () => {
+	const root = createWebFixture();
+	const oldPath = process.env.PATH;
+	try {
+		writeFileSync(join(root, "scripts/pi"), `#!/bin/sh\necho invoked >> '${join(root, "pi-calls")}'\nexit 1\n`, { mode: 0o755 });
+		process.env.PATH = join(root, "scripts");
+		for (const options of [{ models: [] }, { modelOutput: "" }, { piResources: { tools: [{ name: "injected", description: "Synthetic tool" }] } }, { models: [], piResources: { tools: [{ name: "injected", description: "Synthetic tool" }] } }]) {
+			const instance = await startHarnessWeb({ repo: root, engine: root, ...options });
+			try {
+				const catalog = await fetchCatalog(instance);
+				assert.deepEqual(catalog.models, []);
+				assert.equal(catalog.piExtensionDetails.some((entry) => entry.origin === "package"), false);
+				assert.equal(catalog.piTools.some((entry) => entry.name === "injected"), Boolean(options.piResources));
+				assert.equal(existsSync(join(root, "pi-calls")), false);
+			} finally { instance.server.close(); await instance.closed; }
+		}
+	} finally { process.env.PATH = oldPath; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Explicit model table input is parsed without native discovery", async () => {
+	const root = createWebFixture();
+	const instance = await startHarnessWeb({ repo: root, engine: root, modelOutput: MODEL_OUTPUT });
+	try {
+		const catalog = await fetchCatalog(instance);
+		assert.equal(catalog.models.length, 3);
+		assert.equal(catalog.models[0].id, "gpt-heavy");
+	} finally { instance.server.close(); await instance.closed; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Web caches the combined native probe and preserves safe flags while loading normal extensions", async () => {
+	const root = createWebFixture();
+	const oldPath = process.env.PATH;
+	try {
+		const path = fixturePackage(root, "native", { name: "@scope/native", description: "Native event-only package", pi: { extensions: ["index.ts"] } });
+		const envelope = { type: "harness-web-resources", models: [{ provider: "fixture", id: "fixture-model", thinkingLevels: ["off"] }], tools: [], commands: [] };
+		const event = JSON.stringify({ type: "extension_ui_request", method: "notify", message: JSON.stringify(envelope) });
+		writeFileSync(join(root, "scripts/pi"), `#!/bin/sh\necho "$*" >> '${join(root, "pi-calls")}'\ncase "$*" in\n  'list') printf 'User packages:\\n  npm:@scope/native\\n    ${path}\\n' ;;\n  *) printf '%s\\n' '${event}' ;;\nesac\n`, { mode: 0o755 });
+		process.env.PATH = join(root, "scripts");
+		const instance = await startHarnessWeb({ repo: root, engine: root });
+		try {
+			for (let index = 0; index < 2; index += 1) {
+				const catalog = await fetchCatalog(instance);
+				assert.equal(catalog.piExtensionDetails.find((entry) => entry.name === "@scope/native").available, true);
+				assert.equal(catalog.models[0].id, "fixture-model");
+			}
+			const calls = readFileSync(join(root, "pi-calls"), "utf8").trim().split("\n");
+			assert.equal(calls.length, 2, "RPC and list run only once per server");
+			assert.equal(calls[1], "list", "package subcommand must be first; leading flags turn list into a model prompt");
+			for (const flag of ["--offline", "--no-context-files", "--no-skills", "--no-session", "--mode rpc"]) assert.ok(calls[0].includes(flag));
+			assert.equal(calls[0].includes("--no-extensions"), false);
+			assert.equal(calls[0].includes("--no-tools"), false, "metadata discovery needs registered tools; it sends no prompt and executes none");
+		} finally { instance.server.close(); await instance.closed; }
+	} finally { process.env.PATH = oldPath; rmSync(root, { recursive: true, force: true }); }
 });
 
 test("Web save transaction applies, verifies, and detects concurrent edits", () => {

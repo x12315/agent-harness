@@ -1,4 +1,5 @@
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync, cpSync, rmSync, realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -94,6 +95,29 @@ if (command === "compose --apply") {
 console.log("fixture " + command + ": OK");
 `);
 	return root;
+}
+
+/** Data-only Git Catalog + registered local source for sync HTTP/browser tests. No native credentials. */
+export function createCatalogSyncFixture() {
+	const seed = createWebFixture();
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "harness-sync-web-")));
+	const source = join(root, "source"), repo = join(root, "catalog"), home = join(root, "home");
+	cpSync(seed, source, { recursive: true });
+	rmSync(seed, { recursive: true, force: true });
+	for (const path of ["scripts", "schemas", "tmp"]) rmSync(join(source, path), { recursive: true, force: true });
+	writeFileSync(join(source, ".gitignore"), "*.harness.lock\n/skills/*\n!/skills/long-skill/\n!/skills/short-skill/\n");
+	writeFileSync(join(source, "README.md"), "Synthetic configuration repository.\n");
+	mkdirSync(home);
+	const git = (directory, ...args) => execFileSync("git", ["-C", directory, "-c", "core.hooksPath=/dev/null", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+	git(source, "init", "-b", "main");
+	git(source, "config", "user.name", "Fixture"); git(source, "config", "user.email", "fixture@example.test");
+	git(source, "add", "."); git(source, "commit", "-m", "fixture: initial catalog");
+	git(root, "clone", source, repo);
+	const update = text => {
+		writeFileSync(join(source, "README.md"), text);
+		git(source, "add", "README.md"); git(source, "commit", "-m", "fixture: catalog update");
+	};
+	return { root, repo, source, home, git, update };
 }
 
 /** Isolated data for real TUI probes; no user's Catalog or authentication is copied. */

@@ -102,7 +102,10 @@ else {
   const extensions = p.extensions.map(id=>({id,entry:'fixture-'+id}));
   json({command:'get_commands',data:{commands:[...p.skills.map(name=>({name:'skill:'+name,source:'skill'})),{name:'skill:profile-config',source:'skill'},{name:'harness',source:'extension',sourceInfo:{source:'inline',path:'fixture-harness-manager'}}]}});
   json({type:'extension_ui_request',method:'notify',message:JSON.stringify({activeTools:p.tools,builtinTools:p.tools,toolSources:[],resolvedExtensions:extensions,instructionPresent:true,model:{provider:p.defaultProvider,id:p.defaultModel},thinking:p.defaultThinkingLevel})});
- } else json([{content:[{text:p.instructions+' '+p.skills.map(name=>'(file: r0/'+name+'/SKILL.md)').join(' ')+' sandbox_mode\` is \`workspace-write\` \`approvals_reviewer\` is \`auto_review\`'}]}]);
+ } else json([
+  {role:'developer',content:[{text:['<permissions instructions>','sandbox_mode\` is \`workspace-write\`','# Escalation Requests','## How to request escalation','- Provide the \`sandbox_permissions\` parameter with the value \`"require_escalated"\`','</permissions instructions>'].join('\\n')}]},
+  {role:'developer',content:[{text:p.instructions+' '+p.skills.map(name=>'(file: r0/'+name+'/SKILL.md)').join(' ')}]}
+ ]);
 }
 `;
 		for (const command of ["pi", "pi-profile", "codex", "npm"]) writeFileSync(join(root, "bin", command), stub, { mode: 0o755 });

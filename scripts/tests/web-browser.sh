@@ -10,7 +10,7 @@ ROOT=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1
 URL=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).url)' "$STATE")
 case "$ROOT" in */harness-web-*) ;; *) echo "Not an isolated Web fixture" >&2; exit 2;; esac
 ab() { npx --yes agent-browser@0.38.2 --session "${AGENT_BROWSER_SESSION:-harness-web-qa}" "$@"; }
-check() { printf '%s\n' "$1" | ab eval --stdin; }
+check() { printf '(() => {\n%s\n})()\n' "$1" | ab eval --stdin; printf 'Browser assertion passed\n'; }
 audit() {
   ab a11y --json > "$EVIDENCE/$1-a11y.json"
   node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1])).data;if(d.counts.violations)throw Error(JSON.stringify(d.violations));console.log("axe violations=0, manual-review="+d.counts.incomplete)' "$EVIDENCE/$1-a11y.json"
@@ -21,6 +21,50 @@ ab snapshot -i > "$EVIDENCE/compare-snapshot.txt"
 audit compare
 ab screenshot "$EVIDENCE/compare-desktop.png"
 check 'if(document.querySelectorAll(".configuration-row").length!==3||!document.querySelector("#inspector").hidden)throw Error("configuration list is missing or contains presentation sidebar");if(document.querySelector("#main h2").textContent!=="配置方案"||document.querySelector(".eyebrow, .profile-card"))throw Error("presentation UI returned"); "editable configuration list with product labels"'
+# Management is a real source/target form and a readonly, review-before-execution handoff.
+ab click '[data-route="manage"]'
+ab wait --fn 'document.querySelector("#resource-management-form") !== null'
+ab fill '[data-field="source"]' 'https://github.com/example/skills'
+ab fill '[data-field="revision"]' 'v1.2.3'
+ab fill '[data-field="destination"]' '/approved/location with spaces'
+ab click '#resource-management-form button[type="submit"]'
+check 'if(!document.querySelector("#resource-task")?.value.includes("/approved/location with spaces")||!document.querySelector("#resource-task").value.includes("不授权安装")||!document.querySelector("#resource-plan-output").textContent.includes("尚未执行"))throw Error("installation handoff missing actual scope or approval boundary");if(document.activeElement.id!=="resource-task")throw Error("task focus missing");"source and requested target do not install"'
+audit resource-management
+ab screenshot --full "$EVIDENCE/resource-management-desktop.png"
+ab click '[data-action="copy-resource-plan"]'
+check 'if(!/已复制|剪贴板不可用/.test(document.querySelector("#toast-region").textContent))throw Error("clipboard result not explained");"copy has explicit non-execution feedback"'
+ab fill '[data-field="source"]' 'https://user:password@github.com/example/skills'
+check 'if(document.querySelector("#resource-task")||document.querySelector(`[data-action="copy-resource-plan"]`))throw Error("old task survived input change");"changing input invalidates the previous task"'
+ab click '#resource-management-form button[type="submit"]'
+check 'if(!document.querySelector("#resource-plan-error").textContent.includes("不含凭据")||document.querySelector("#resource-task"))throw Error("credential-shaped URL was accepted");"credential-bearing source blocked"'
+ab select '[data-field="sourceMode"]' 'local'
+ab fill '[data-field="source"]' '/work/local skill'
+ab click '#resource-management-form button[type="submit"]'
+check 'if(!document.querySelector("#resource-task")?.value.includes("/work/local skill")||!document.querySelector("#resource-task").value.includes("绝不删除原始本地源码"))throw Error("local-path preservation missing");"local source is explicit and preserved"'
+ab select '[data-field="operation"]' 'remove'
+ab select '[data-field="name"]' 'long-skill'
+ab select '[data-field="effect"]' 'uninstall'
+ab click '#resource-management-form button[type="submit"]'
+check 'if(!document.querySelector("#resource-plan-error").textContent.includes("不能按受管副本卸载")||document.querySelector("#resource-task"))throw Error("personal source uninstall was offered");"source deletion is not an uninstall"'
+ab select '[data-field="effect"]' 'references'
+ab click '#resource-management-form button[type="submit"]'
+check 'if(!document.querySelector("#resource-task")?.value.includes(`"removalScope": "references"`)||document.querySelectorAll(`#resource-plan-output [data-route^="profile/"]`).length!==2)throw Error("reference scope or saved wildcard consumers missing");"removal scope and consumers are inspectable"'
+ab select '[data-field="kind"]' 'extension'
+ab select '[data-field="name"]' 'harness-manager'
+ab click '#resource-management-form button[type="submit"]'
+check 'if(!document.querySelector("#resource-plan-error").textContent.includes("不能移除"))throw Error("required management could be removed");"required entry cannot be removed"'
+ab select '[data-field="name"]' '@calesennett/pi-codex-fast'
+ab select '[data-field="effect"]' 'uninstall'
+ab click '#resource-management-form button[type="submit"]'
+check 'if(!document.querySelector("#resource-plan-output").textContent.includes("整个包")||!document.querySelector("#resource-task").value.includes("npm:@calesennett/pi-codex-fast@0.0.0-fixture"))throw Error("package-wide removal and exact source missing");"package removal preserves exact identity"'
+audit resource-management-removal
+ab set viewport 375 812
+check 'if(document.documentElement.scrollWidth>window.innerWidth+1)throw Error("management form overflow");"mobile form has no horizontal overflow"'
+audit resource-management-mobile
+ab screenshot "$EVIDENCE/resource-management-mobile.png"
+ab set viewport 1280 720
+node -e 'const f=require("fs"),root=process.argv[1];if(f.existsSync(root+"/calls.log"))throw Error("management task executed a worker");if(JSON.parse(f.readFileSync(root+"/profiles/heavy.json")).label!=="Heavy fixture")throw Error("management changed a Profile");' "$ROOT"
+ab click '#primary-nav [data-route="compare"]'
 ab fill '[data-action="profile-label"][data-profile="heavy"]' 'Renamed Configuration'
 ab fill '[data-action="profile-description"][data-profile="heavy"]' 'Editable configuration description'
 node -e 'if(require("fs").readFileSync(process.argv[1],"utf8").includes("Renamed Configuration"))throw Error("inline draft wrote source")' "$ROOT/profiles/heavy.json"
@@ -39,6 +83,32 @@ ab focus '.skip-link'
 ab press Enter
 check 'if(location.hash!=="#profile/medium"||document.activeElement!==document.querySelector("#main"))throw Error("skip link changed the route or failed to focus main"); "skip link preserved route and focused content"'
 audit profile
+# Pi resources use the same draft, detail and Profile shortcuts as Skills.
+ab click '[data-action="go-section"][data-section="runtime"]'
+check 'if(document.activeElement.id!=="section-runtime"||!document.querySelector(`[data-action="toggle-extension"][data-name="harness-manager"]`).disabled)throw Error("Pi section navigation or required manager failed"); "Pi management boundary retained"'
+ab fill '[data-action="pi-resource-search"]' 'subagent'
+ab check '[data-action="toggle-tool"][data-name="subagent"]'
+check 'if(!document.querySelector("[data-pi-resources]").textContent.includes("需要扩展 subagent")||document.querySelector(`[data-action="toggle-extension"][data-name="subagent"]`).checked)throw Error("tool incorrectly opened its extension"); "tool does not silently enable extension"'
+ab click '[data-action="inspect-pi-resource"][data-kind="tool"][data-name="subagent"]'
+check 'const p=document.querySelector("#inspector");if(!p.textContent.includes("FULL-TOOL-DESCRIPTION-END")||!p.textContent.includes("Task for the child agent")||p.querySelector("img")||p.textContent.includes("PRIVATE-TOOL-DEFAULT")||!p.querySelector("[data-action=save-profile]"))throw Error("Pi tool detail unsafe, incomplete or hid draft actions"); "Pi tool documentation, schema and draft actions coexist"'
+audit pi-tool-detail
+ab click '[data-action="close-detail"]'
+check 'if(document.activeElement?.dataset.action!=="inspect-pi-resource")throw Error("closing Pi detail lost keyboard focus"); "Pi detail returns keyboard focus"'
+ab click '[data-action="undo-profile"]'
+ab fill '[data-action="pi-resource-search"]' 'codex-fast'
+ab check '[data-action="toggle-extension"][data-name="@calesennett/pi-codex-fast"]'
+ab click '[data-action="inspect-pi-resource"][data-kind="extension"][data-name="@calesennett/pi-codex-fast"]'
+check 'const p=document.querySelector("#inspector").textContent;if(!p.includes("/codex-fast")||!p.includes("DeepSeek 不适用")||!p.includes("加载扩展不等于开启速度模式"))throw Error("Fast extension detail missing scope or limitations"); "Fast extension explains scope and model compatibility"'
+ab click '[data-action="close-detail"]'
+ab click '[data-action="undo-profile"]'
+ab click '#primary-nav [data-route="pi"]'
+ab fill '[data-action="pi-resource-search"]' 'codex-fast'
+check 'if(document.querySelectorAll(".resource-row").length!==1||!document.querySelector("#main").textContent.includes("@calesennett/pi-codex-fast"))throw Error("disabled native package missing from Pi directory"); "disabled package discoverable with exact scoped identifier"'
+audit pi-directory
+ab screenshot "$EVIDENCE/pi-directory-desktop.png"
+ab click '#main [data-route="profile/medium"][data-section="runtime"]'
+check 'if(document.activeElement.id!=="section-runtime")throw Error("Pi directory shortcut did not focus editable settings"); "Pi directory opens Profile settings"'
+ab fill '[data-action="pi-resource-search"]' ''
 ab fill '[data-action="profile-label"]' 'Browser Draft Medium'
 ab click '[data-route="profile/heavy"]'
 ab fill '[data-action="profile-label"]' 'Other Profile Draft'
@@ -49,6 +119,7 @@ ab click '[data-action="inspect-instruction"][data-id="profile/implementation"]'
 check 'if(!document.querySelector("[data-action=save-profile]"))throw Error("detail hid save"); "detail and change tray coexist"'
 ab click '[data-action="close-detail"]'
 ab click '[data-action="set-instruction-detail"][data-id="profile/implementation"][data-detail="detailed"]'
+ab scrollintoview '[data-action="move-instruction"][data-id="profile/model-standard"][data-direction="up"]'
 ab click '[data-action="move-instruction"][data-id="profile/model-standard"][data-direction="up"]'
 check 'if(document.querySelector(".instruction-row [data-id]").dataset.id!=="profile/model-standard")throw Error("order not reflected visually");if(document.activeElement===document.body||document.activeElement.disabled)throw Error("reordering lost keyboard focus"); "visible order updated; focus retained"'
 ab fill '[data-action="model-search"]' '61s'
@@ -165,6 +236,7 @@ check 'if(!document.querySelector("[data-action=pi-thinking]").disabled||!docume
 node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1]));if(p.instructions.length||p.skills.length||p.adapters.pi.model||p.adapters.codex.sandbox!=="read-only")throw Error("blank defaults mismatch")' "$ROOT/profiles/blank-profile.json"
 ab set viewport 1440 1000
 ab select '[data-action="pi-provider"]' 'openai-codex'
+ab click '#section-models .other-agent-settings summary'
 ab click '[data-action="sync-codex-model"]'
 ab click '[data-action="save-profile"]'
 ab click '#confirm-save'

@@ -15,6 +15,7 @@
 			<h1>Harness 控制台</h1>
 			<div class="topbar-status">
 				<span id="connection-state" class="status-pill"><span class="status-dot" aria-hidden="true"></span>连接中</span>
+				<button id="catalog-update-indicator" class="button ghost compact" type="button" data-route="sync" hidden>配置仓有更新</button>
 				<button class="button ghost compact" type="button" data-action="doctor">运行检查</button>
 				<button class="button ghost compact" type="button" data-action="shutdown">关闭服务</button>
 			</div>
@@ -67,6 +68,13 @@
 		<p id="instruction-error" role="status"></p>
 		<button id="load-latest-instruction" class="button ghost" data-action="load-latest-instruction" hidden>加载最新原文，保留编辑草稿</button>
 		<div class="dialog-actions"><button class="button ghost" data-action="close-editor">返回详情</button><button class="button primary" data-action="save-instruction-text">保存修改</button></div>
+	</dialog>
+	<dialog id="catalog-sync-dialog" class="confirm-dialog" aria-labelledby="catalog-sync-title">
+		<h2 id="catalog-sync-title">配置仓有更新</h2>
+		<div id="catalog-sync-review"></div>
+		<p class="helper">只快进当前 Catalog，不更新工具仓、不执行仓库代码或 hooks、不安装依赖、不改原生设置。配置可能包含模型指令和扩展源码；请先审阅来源与文件列表。同意同步不等于同意加载这些代码。</p>
+		<p class="helper">同步前保留仅含 Git 跟踪源码的 0600 快照。有改动、分叉或锁冲突就停止，不自动覆盖或重置；Git 工作树更新不是跨所有文件的原子事务，异常时保留恢复记录供人工处理。</p>
+		<div class="dialog-actions"><button class="button ghost" type="button" data-action="sync-later">稍后处理</button><button class="button primary" id="catalog-sync-apply" type="button" data-action="sync-apply">确认同步配置</button></div>
 	</dialog>
 	<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
 		<form method="dialog">
