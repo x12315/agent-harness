@@ -27,9 +27,9 @@ harness --catalog=/path/to/catalog doctor
 
 | 命令 | 用途 |
 | --- | --- |
-| `pi-h` / `harness pi [Pi arguments]` | 启动可热切换的普通 Pi，进入后用 `/harness switch` 选择方案 |
+| `pi-h` / `harness pi [Pi arguments]` | 启动可热切换的普通 Pi，进入后用 `/harness` 管理菜单选择方案 |
 | `harness web` / Pi `/harness web` | 方案新建、复制、编辑、删除、预览与审阅 |
-| Pi `/harness` | 无服务的人工 TUI 管理 |
+| Pi `/harness` | Pi 内管理主入口：当前方案切换、基础配置与维护；子命令仅作快捷方式 |
 | `harness profile list\|show\|path <id>` | 查看 Catalog 声明 |
 | `harness compose --apply` | 编译指令、Profiles 和 schema 副本 |
 | `harness bootstrap --apply` | 更新精确归属的原生投影，合并工程设置而保留个性化 |
@@ -43,6 +43,8 @@ harness --catalog=/path/to/catalog doctor
 
 Pi/Codex 仍拥有自己的运行进程与交互循环。通过 `pi-profile <id>` 或 `codex -p <id>` 选择完整工作组合；`harness run` 是脚本化别名。人工控制面不注册为模型工具，也不受 Profile 工作工具权限约束。子 Agent 工具只能取父子 allowlist 的交集。
 
+**以什么为准：** Catalog 源码是配置的唯一来源；当前会话启用什么，以 Pi 实际运行时为准（页脚与 `/profile status`），不是编辑器中选中的方案。Pi 内统一以裸 `/harness` 管理菜单为主入口，`/harness <操作>` 只作对应菜单项的快捷方式。菜单、帮助和补全来自同一份操作定义，所有菜单项与快捷命令都经同一个执行入口；菜单不另行判断切换权限。菜单切换与 `/harness switch <id>` 共用实现，发起切换后退出管理面，避免旧菜单跨运行时重载继续工作；取消选择则返回菜单。Web 是完整配置工作台，TUI 仅提供词条、Skills、推荐模型的基础编辑及维护；工具/扩展配置、方案新建/复制/删除使用 `/harness web`。保存配置不会自动切换正在运行的会话，需重选方案或 `/reload`。
+
 ### 在项目目录启动 Pi
 
 完成 compose、bootstrap 与依赖恢复后，将 `~/.local/bin` 加入 PATH：
@@ -50,13 +52,14 @@ Pi/Codex 仍拥有自己的运行进程与交互循环。通过 `pi-profile <id>
 ```bash
 cd /path/to/project
 pi-h                         # 等价于 harness pi
-# Pi 内：/harness switch medium（或 /harness switch 打开选择）
+# Pi 内：/harness → 切换当前工作方案
+# 快捷方式：/harness switch medium
 # 需要重新进入普通模式时，退出后再次运行 pi-h
 pi-h --model provider/model --thinking high
 pi-h --continue              # 原生 Pi 的会话续接参数
 ```
 
-入口显式启动上游内置 `default`，不恢复上次保存的方案，也不把 default 写成最后选择；它保留本机普通资源、模型默认值、scope 和主题，不强迫先选方案。启动后页脚显示「普通模式 · 未选择工作方案」，输入框上方提示用 `/harness switch` 选择；选定工作方案后提示消失，页脚显示已启用的方案。`default` 是上游普通资源模式的内部名称，不是 Catalog 的默认工作方案。之后的资源准备、热切换、reload、会话和 Agent 循环由固定版本的 `pi-profile-switch` 与原生 Pi 执行。人工 `/harness` 被显式加载一次，即使使用 `--no-extensions` 关闭自动发现也保留管理入口。
+入口显式启动上游内置 `default`，不恢复上次保存的方案，也不把 default 写成最后选择；它保留本机普通资源、模型默认值、scope 和主题，不强迫先选方案。启动后页脚显示「普通模式 · 未选择工作方案」，输入框上方提示用 `/harness` 管理菜单选择；选定工作方案后提示消失，页脚显示已启用的方案。`default` 是上游普通资源模式的内部名称，不是 Catalog 的默认工作方案。之后的资源准备、热切换、reload、会话和 Agent 循环由固定版本的 `pi-profile-switch` 与原生 Pi 执行。人工 `/harness` 被显式加载一次，即使使用 `--no-extensions` 关闭自动发现也保留管理入口。
 
 Pi 参数（含 `--`、提示词、stdin/stdio、退出码和 SIGINT/SIGTERM）直接透传。`harness --catalog=/path pi ...` 的 Catalog 选择必须在 `pi` 前；`pi-h` 使用环境或已激活的 Catalog。投影或版本不符时停止，不自动 bootstrap、安装或改用户设置。已有 `PI_CODING_AGENT_DIR` 时拒绝嵌套启动，请从外部终端运行或在会话内热切换。直接指定方案仍用 `pi-profile <id>` / `harness run pi <id>`；`pi-h medium` 是 Pi 提示词，不是方案参数。
 
@@ -91,7 +94,7 @@ git diff --check
 
 发布版本或修改检查执行路径时，遵循 [性能回归验收](docs/performance.md)：至少各三轮、保留覆盖与两仓源码身份、按显式预算比较历史报告，无法比较或实测时记录原因。功能验收与性能指标一起留档。
 
-Web 细节见 [web/README.md](web/README.md)。运行中的 Pi 扩展改动需要 `/reload` 或重开会话；旧 Web 服务需关闭后重启。机器个性化、认证和运行目录不因代码仓升级而被纳管。
+Web 的“配置仓同步”可登记当前 Catalog 的 Git remote/分支，开启可见页面的自动检查与更新弹窗；确认后仅快进配置仓，脏仓/分叉不覆盖，不更新工具或安装依赖。配置应用另行审阅；详见 [web/README.md](web/README.md)。运行中的 Pi 扩展改动需要 `/reload` 或重开会话；旧 Web 服务需关闭后重启。机器个性化、认证和运行目录不因代码仓升级而被纳管。
 
 ## 历史拆分
 

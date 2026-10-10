@@ -21,6 +21,7 @@ import { buildAgentToolArgs } from "../adapters/pi/extensions/subagent/tool-poli
 import { compose } from "./compose.mjs";
 import { checkAdapterContract } from "./lib/adapter-contract.mjs";
 import { mapChecks, runCheckCommand } from "./lib/check-runner.mjs";
+import { codexApprovalPolicyMatches, codexPermissionsText, piExtensionRuntimeProblems } from "./lib/runtime-validation.mjs";
 import { ENGINE, ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, PI_PROFILE_CONFIG_SKILL, REPO, SHARED_PI_SETTINGS, engineeringPiSettings, isInsideRepo, isSymlink, managedLinks, pins, projectionSource, readJson, staleManagedLinks } from "./lib/repo.mjs";
 
 const PI_RUNTIME_PROBE = join(ENGINE, "scripts/probes/pi-runtime.ts");
@@ -91,9 +92,8 @@ async function checkPi() {
     .map(canon).some((p) => p === privateProfileSkill || p === privateProfileFile || p.startsWith(privateProfileSkill + "/"));
   const foreign = skills.filter((c) => canon(c.sourceInfo?.baseDir) !== repoReal && !isAllowedPrivate(c));
   const privateCount = skills.filter(isAllowedPrivate).length;
-  const problems = [];
+  const problems = piExtensionRuntimeProblems(r);
   const harnessCommands = cmds.filter((c) => c.source === "extension" && c.name === "harness");
-  if (stderr) problems.push(`stderr not empty: ${stderr.split("\n")[0].slice(0, 120)}`);
   if (!skills.length) problems.push("no skills discovered");
   if (foreign.length) problems.push(`${foreign.length} skills from outside the repo: ${foreign.slice(0, 3).map((c) => c.name).join(", ")}`);
   if (harnessCommands.length !== 1) problems.push(`expected one /harness control-plane command, found ${harnessCommands.length}`);
@@ -369,13 +369,10 @@ async function checkProfileRuntime({ profiles, adapters = ["pi", "codex"], seria
       const allToolSources = runtimeTools?.toolSources ?? [];
       const activeToolSources = allToolSources.filter((tool) => (runtimeTools?.activeTools ?? []).includes(tool.name));
       const commandSources = runtimeExtensionCommands.map((command) => command.sourceInfo ?? {});
-      const loadedRuntimeSources = [...commandSources, ...allToolSources];
       const activeRuntimeSources = [...commandSources, ...activeToolSources];
       const sourceMatchesExtension = (source, extension) => source.source === `npm:${extension.id}`
         || (source.path && extension.entry && canon(source.path) === canon(extension.entry));
-      const missingLoadedExtensions = resolvedExtensions
-        .filter((extension) => !loadedRuntimeSources.some((source) => sourceMatchesExtension(source, extension)))
-        .map((extension) => extension.id);
+      const extensionProblems = piExtensionRuntimeProblems(r);
       const mcpToolsAllowed = generated.mcps === undefined || generated.mcps.length > 0;
       const unexpectedRuntimeSources = activeRuntimeSources.filter((source) => source.source !== "builtin"
         && source.source !== "cli"
@@ -396,12 +393,10 @@ async function checkProfileRuntime({ profiles, adapters = ["pi", "codex"], seria
         : undefined;
       const modelMismatch = expectedModel && JSON.stringify(runtimeTools?.model) !== JSON.stringify(expectedModel);
       const thinkingMismatch = generated.defaultThinkingLevel && runtimeTools?.thinking !== generated.defaultThinkingLevel;
-      if (r.status !== 0
-        || (r.stderr ?? "").trim()
+      if (extensionProblems.length
         || JSON.stringify(skillCommands) !== JSON.stringify(expectedSkillCommands)
         || missingExtensionCommands.length
         || JSON.stringify(resolvedExtensionIds) !== JSON.stringify(expectedExtensions)
-        || missingLoadedExtensions.length
         || JSON.stringify(actualBuiltinTools) !== JSON.stringify(expectedBuiltinTools)
         || missingConfiguredTools.length
         || activeToolAllowlistMismatch
@@ -409,7 +404,7 @@ async function checkProfileRuntime({ profiles, adapters = ["pi", "codex"], seria
         || runtimeTools?.instructionPresent !== true
         || modelMismatch
         || thinkingMismatch) {
-        problems.push(`Pi ${profile} canary differs: skills=[${skillCommands.join(", ")}], resolved extensions=[${resolvedExtensionIds.join(", ")}], unloaded extensions=[${missingLoadedExtensions.join(", ")}], active tools=[${activeTools.join(", ")}], missing commands=[${missingExtensionCommands.join(", ")}], missing configured tools=[${missingConfiguredTools.join(", ")}], allowlist=${activeToolAllowlistMismatch ? "mismatch" : "ok"}, unexpected custom tools=[${unexpectedCustomTools.join(", ")}], instruction=${runtimeTools?.instructionPresent}, model=${runtimeTools?.model ? `${runtimeTools.model.provider}/${runtimeTools.model.id}` : "missing"}, stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
+        problems.push(`Pi ${profile} canary differs: skills=[${skillCommands.join(", ")}], resolved extensions=[${resolvedExtensionIds.join(", ")}], extension errors=[${extensionProblems.join("; ")}], active tools=[${activeTools.join(", ")}], missing commands=[${missingExtensionCommands.join(", ")}], missing configured tools=[${missingConfiguredTools.join(", ")}], allowlist=${activeToolAllowlistMismatch ? "mismatch" : "ok"}, unexpected custom tools=[${unexpectedCustomTools.join(", ")}], instruction=${runtimeTools?.instructionPresent}, model=${runtimeTools?.model ? `${runtimeTools.model.provider}/${runtimeTools.model.id}` : "missing"}, stderr=${(r.stderr ?? "").trim().slice(0, 120) || "empty"}`);
         break;
       }
     }
@@ -431,8 +426,11 @@ async function checkProfileRuntime({ profiles, adapters = ["pi", "codex"], seria
       const excludedSkills = catalog.skillCatalog.filter((name) => !expectedSkills.includes(name));
       const r = prompts[index];
       let text = "";
+      let permissions = "";
       try {
-        text = JSON.parse(r.stdout ?? "[]")
+        const messages = JSON.parse(r.stdout ?? "[]");
+        permissions = codexPermissionsText(messages);
+        text = messages
           .flatMap((message) => message.content ?? [])
           .map((content) => content.text ?? "")
           .join("\n");
@@ -449,10 +447,8 @@ async function checkProfileRuntime({ profiles, adapters = ["pi", "codex"], seria
       const modelMissing = Boolean(expectedModel && !discoveredModel);
       const reasoningMissing = Boolean(expectedModel?.thinking && discoveredModel
         && !(discoveredModel.supported_reasoning_levels ?? []).some((level) => level.effort === expectedModel.thinking));
-      const sandboxMissing = sandbox && !text.includes(`sandbox_mode\` is \`${sandbox}\``);
-      const approvalMissing = approval === "never"
-        ? !text.includes("Approval policy is currently never.")
-        : approval === "on-request" && !text.includes("`approvals_reviewer` is `auto_review`");
+      const sandboxMissing = sandbox && !permissions.includes(`sandbox_mode\` is \`${sandbox}\``);
+      const approvalMissing = !codexApprovalPolicyMatches(permissions, approval);
       if (r.status !== 0
         || (r.stderr ?? "").trim()
         || missingSkills.length

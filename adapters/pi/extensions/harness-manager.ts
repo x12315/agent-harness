@@ -40,7 +40,6 @@ const PROFILES_DIR = join(REPO, "profiles");
 const SKILLS_DIR = join(REPO, "skills");
 const INSTRUCTIONS_DIR = join(REPO, "instructions");
 const INSTRUCTION_SELECTION = join(INSTRUCTIONS_DIR, "selection.json");
-const ACTIONS = ["status", "profiles", "instructions", "skills", "configure", "web", "switch", "apply", "doctor", "restore", "help"];
 const DETAIL_LABELS = {
 	brief: "精简",
 	standard: "标准",
@@ -91,23 +90,6 @@ type ProfileSource = {
 		};
 	};
 };
-
-const HELP = `Harness Control Plane / Harness 管理面
-
-/harness                         打开管理面
-/harness status                  查看 Catalog 与 runtime 状态
-/harness profiles                查看三个脚手架预设
-/harness instructions            管理 AGENTS.md 常驻词条、详略和源码
-/harness skills                  浏览 Skill 完整说明
-/harness configure <name>        配置 Profile 词条、Skills 与推荐模型
-/harness web                     打开本地 Web 编排工作台
-/harness switch <name>           在可切换会话中热切换工作方案
-/harness apply                   生成、投影并验收
-/harness doctor                  运行只读完整检查
-/harness restore                 通过官方工具恢复声明依赖
-/harness edit <name>             高级：直接编辑 Profile JSON
-
-AGENTS.md 词条是 instruction，不是 Subagent 角色。mandatory 词条不可关闭；repository 和 Profile 词条可逐项启停。`;
 
 function profileNames(): string[] {
 	if (!existsSync(PROFILES_DIR)) return [];
@@ -285,6 +267,7 @@ function compactOutput(stdout: string, stderr: string): string {
 	return text.length > 12_000 ? `${text.slice(0, 12_000)}\n… output truncated` : text;
 }
 
+/** Register human Catalog management and session switching without exposing model tools. */
 export default function harnessManager(pi: ExtensionAPI) {
 	function profileRuntimePlan(): { profile: string; source?: string } | undefined {
 		const runtimeDir = process.env.PI_CODING_AGENT_DIR;
@@ -297,10 +280,6 @@ export default function harnessManager(pi: ExtensionAPI) {
 		}
 	}
 
-	function hasProfileRuntime(): boolean {
-		return profileRuntimePlan() !== undefined;
-	}
-
 	pi.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		ctx.ui.setWidget("harness-profile-hint", undefined);
@@ -309,7 +288,7 @@ export default function harnessManager(pi: ExtensionAPI) {
 		ctx.ui.setStatus("profile", "普通模式 · 未选择工作方案");
 		ctx.ui.setWidget("harness-profile-hint", [
 			"Harness 已启用 · 尚未选择工作方案（当前使用普通 Pi 资源）",
-			"输入 /harness switch 打开方案选择，选好后在当前会话中生效。",
+			"输入 /harness 打开管理菜单选择工作方案；快捷方式：/harness switch。",
 		]);
 	});
 
@@ -470,22 +449,23 @@ export default function harnessManager(pi: ExtensionAPI) {
 		}
 	}
 
-	async function switchProfile(name: string | undefined, ctx: ExtensionCommandContext) {
-		const selected = name || await chooseProfile(ctx, "选择工作脚手架");
-		if (!selected) return;
+	async function switchProfile(name: string | undefined, ctx: ExtensionCommandContext): Promise<boolean> {
+		const selected = name || await chooseProfile(ctx, "选择当前会话的工作方案");
+		if (!selected) return false;
 		if (!profileNames().includes(selected)) {
 			ctx.ui.notify(`未知 Profile：${selected}`, "error");
-			return;
+			return false;
 		}
-		if (!hasProfileRuntime()) {
+		if (!profileRuntimePlan()) {
 			ctx.ui.notify([
 				"当前是普通 Pi 会话，不能在运行中安全替换启动时发现的 Skills、Extensions 与 Instructions。",
 				`下次可直接运行 pi-h（或 harness pi），再用 /harness switch ${selected}，无需再次退出。`,
 				`也可直接运行：pi-profile ${selected}。这些入口只准备资源，交互仍由原生 Pi 执行。`,
 			].join("\n\n"), "warning");
-			return;
+			return false;
 		}
 		pi.sendUserMessage(`/profile use ${selected}`, { expandPromptTemplates: true });
+		return true;
 	}
 
 	async function browseSkills(ctx: ExtensionCommandContext) {
@@ -749,7 +729,7 @@ export default function harnessManager(pi: ExtensionAPI) {
 			const combined = [...draft.mandatory, ...draft.repository];
 			const choice = await selectDetailed(ctx, "AGENTS.md 常驻词条", [
 				{ value: "entries", label: "逐项管理", description: `${combined.length}/${entries.length} 已启用；每项可选精简、标准或详细说明` },
-				{ value: "save", label: "保存并应用", description: "重建 AGENTS.md、投影并运行完整检查" },
+				{ value: "save", label: "保存并应用", description: "重建 AGENTS.md 并检查受影响项；运行中的会话需重载" },
 				{ value: "back", label: "返回上级", description: "放弃本次尚未保存的启停与详略修改" },
 			]);
 			if (!choice || choice === "back") return;
@@ -801,7 +781,7 @@ export default function harnessManager(pi: ExtensionAPI) {
 				{ value: "instructions", label: "Profile 词条", description: `${draft.instructions.length} 项；逐项启停、选择详略、预览或编辑` },
 				{ value: "skills", label: "Skills 能力", description: `已启用 ${skills.size}/${catalog.length}；控制模型可发现的专业流程` },
 				{ value: "models", label: "推荐模型", description: `Pi ${draft.adapters.pi.model?.provider ?? "继承"}/${draft.adapters.pi.model?.id ?? "继承"} · Codex ${draft.adapters.codex.model?.id ?? "继承"}` },
-				{ value: "save", label: "保存并应用", description: "重新生成、投影并完整检查；失败时自动回滚" },
+				{ value: "save", label: "保存并应用", description: "重新生成并检查受影响项；当前会话需重选方案；外部改动时停止回滚" },
 				{ value: "back", label: "返回上级", description: "放弃本次尚未保存的 Profile 修改" },
 			]);
 			if (!choice || choice === "back") return;
@@ -853,52 +833,72 @@ export default function harnessManager(pi: ExtensionAPI) {
 		else if (await notifyRun(["restore", "--apply"], ctx)) await notifyRun(["doctor"], ctx);
 	}
 
+	const actions: Array<SelectItem & {
+		profileArgument?: boolean;
+		run: (args: string[], ctx: ExtensionCommandContext) => void | Promise<void | boolean>;
+	}> = [
+		{ value: "status", label: "查看状态", description: "查看 Catalog、当前工作方案、依赖与投影概况", run: async (_args, ctx) => { await notifyRun(["status"], ctx, 30_000); } },
+		{ value: "instructions", label: "AGENTS.md 词条", description: "逐项启停 repository 词条、选择详略、预览和编辑源码", run: (_args, ctx) => configureGlobalInstructions(ctx) },
+		{ value: "skills", label: "Skills 目录", description: "搜索摘要并查看完整说明，不改变 Profile", run: (_args, ctx) => browseSkills(ctx) },
+		{ value: "configure", label: "配置工作方案（基础）", description: "词条、Skills、推荐模型；保存不切换会话", profileArgument: true, run: (args, ctx) => configureProfile(args[0], ctx) },
+		{ value: "web", label: "打开 Web 配置工作台", description: "完整编辑、工具与扩展、方案新建/复制/删除", run: (_args, ctx) => launchWeb(ctx) },
+		{ value: "switch", label: "切换当前工作方案", description: "在当前会话生效；发起切换后退出管理面", profileArgument: true, run: (args, ctx) => switchProfile(args[0], ctx) },
+		{ value: "apply", label: "应用 Catalog", description: "重新生成 adapter、修复受管投影并运行验收", run: (args, ctx) => mutate("apply", args, ctx) },
+		{ value: "doctor", label: "完整检查", description: "只读检查生成物、依赖、密钥、运行时与投影", run: async (_args, ctx) => { await notifyRun(["doctor"], ctx); } },
+		{ value: "restore", label: "恢复依赖", description: "委托固定版本的官方工具恢复缺失依赖", run: (args, ctx) => mutate("restore", args, ctx) },
+		{ value: "profiles", label: "工作方案列表", description: "查看 Catalog 中已保存的工作方案", run: async (_args, ctx) => { await notifyRun(["profile", "list"], ctx, 30_000); } },
+		{ value: "edit", label: "高级 JSON 编辑", description: "直接编辑工作方案源码；保存不切换会话", profileArgument: true, run: (args, ctx) => editProfile(args[0], ctx) },
+		{ value: "help", label: "帮助与快捷命令", description: "菜单是主入口；命令是同一操作的快捷方式", run: (_args, ctx) => ctx.ui.notify(helpText(), "info") },
+	];
+
+	function helpText(): string {
+		return [
+			"Harness 管理面 · /harness 是主入口，以下命令仅是菜单操作的快捷方式。",
+			"Catalog 是配置来源，当前工作方案以 Pi 运行时为准；保存不切换当前会话。",
+			"",
+			"/harness                         打开管理菜单",
+			...actions.map(action => `${`/harness ${action.value}${action.profileArgument ? " [id]" : ""}`.padEnd(32)} ${action.label} · ${action.description}`),
+			"",
+			"AGENTS.md 词条是 instruction，不是 Subagent 角色。mandatory 词条不可关闭。",
+		].join("\n");
+	}
+
+	async function executeAction(name: string, args: string[], ctx: ExtensionCommandContext): Promise<boolean> {
+		const action = actions.find(action => action.value === name);
+		if (!action) {
+			ctx.ui.notify(`未知 harness 操作：${name}\n\n${helpText()}`, "error");
+			return false;
+		}
+		return await action.run(args, ctx) === true;
+	}
+
 	async function handle(raw: string, ctx: ExtensionCommandContext) {
-		const words = raw.trim().split(/\s+/).filter(Boolean);
-		const action = words[0] ?? "";
-		if (action === "help") ctx.ui.notify(HELP, "info");
-		else if (action === "status") await notifyRun(["status"], ctx, 30_000);
-		else if (action === "profiles") await notifyRun(["profile", "list"], ctx, 30_000);
-		else if (action === "instructions") await configureGlobalInstructions(ctx);
-		else if (action === "skills") await browseSkills(ctx);
-		else if (action === "configure") await configureProfile(words[1], ctx);
-		else if (action === "web") launchWeb(ctx);
-		else if (action === "switch") await switchProfile(words[1], ctx);
-		else if (action === "edit") await editProfile(words[1], ctx);
-		else if (action === "apply") await mutate("apply", words.slice(1), ctx);
-		else if (action === "doctor") await notifyRun(["doctor"], ctx);
-		else if (action === "restore") await mutate("restore", words.slice(1), ctx);
-		else if (action) ctx.ui.notify(`未知 harness 操作：${action}\n\n${HELP}`, "error");
-		else {
-			while (true) {
-				const inProfileRuntime = hasProfileRuntime();
-				const selected = await selectDetailed(ctx, "Harness 管理面", [
-					{ value: "status", label: "查看状态", description: "查看 Catalog、当前脚手架、依赖与投影概况" },
-					{ value: "instructions", label: "AGENTS.md 词条", description: "逐项启停 repository 词条、选择详略、预览和编辑源码" },
-					{ value: "skills", label: "Skills 目录", description: "搜索摘要并查看完整说明，不改变 Profile" },
-					{ value: "configure", label: "配置脚手架", description: "配置 Profile 词条、Skills 和推荐模型" },
-					{ value: "web", label: "打开 Web 编排", description: "横向比较并批量调整 Profile；使用同一 Catalog 与保存事务" },
-					{ value: "switch", label: inProfileRuntime ? "切换当前脚手架" : "启动其他脚手架", description: inProfileRuntime ? "热切换并重载隔离资源" : "完整资源切换需要退出后从启动边界选择" },
-					{ value: "apply", label: "应用 Catalog", description: "重新生成 adapter、修复受管投影并运行验收" },
-					{ value: "doctor", label: "完整检查", description: "只读检查生成物、依赖、密钥、运行时与投影" },
-					{ value: "restore", label: "恢复依赖", description: "委托固定版本的官方工具恢复缺失依赖" },
-					{ value: "back", label: "退出管理面", description: "返回 Pi 输入框" },
-				]);
-				if (!selected || selected === "back") return;
-				await handle(selected, ctx);
-			}
+		const [name, ...args] = raw.trim().split(/\s+/).filter(Boolean);
+		if (name) {
+			await executeAction(name, args, ctx);
+			return;
+		}
+		while (true) {
+			const plan = profileRuntimePlan();
+			const current = plan ? (plan.profile === "default" && plan.source === "builtin" ? "普通模式" : `${profileChoice(plan.profile).label} [${plan.profile}]`) : "原生 Pi";
+			const selected = await selectDetailed(ctx, `Harness 管理面 · 当前：${current}`, [
+				...actions.map(({ value, label, description }) => ({ value, label, description })),
+				{ value: "back", label: "退出管理面", description: "返回 Pi 输入框" },
+			]);
+			if (!selected || selected === "back") return;
+			if (await executeAction(selected, [], ctx)) return;
 		}
 	}
 
 	pi.registerCommand("harness", {
-		description: "管理 AGENTS.md 词条、三档脚手架、Skills、投影与健康状态",
+		description: "打开 Harness 管理菜单；子命令是菜单操作的快捷方式",
 		getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
-			const [action = "", value = ""] = prefix.split(/\s+/, 2);
-			if (["switch", "configure", "edit"].includes(action)) {
-				const items = profileNames().filter((name) => name.startsWith(value)).map((name) => ({ value: `${action} ${name}`, label: name }));
+			const [name = "", value = ""] = prefix.split(/\s+/, 2);
+			if (actions.find(action => action.value === name)?.profileArgument) {
+				const items = profileNames().filter(profile => profile.startsWith(value)).map(profile => ({ value: `${name} ${profile}`, label: profile }));
 				return items.length ? items : null;
 			}
-			const items = ACTIONS.filter((name) => name.startsWith(action)).map((name) => ({ value: name, label: name }));
+			const items = actions.filter(action => action.value.startsWith(name)).map(action => ({ value: action.value, label: `${action.value} · ${action.label}` }));
 			return items.length ? items : null;
 		},
 		handler: handle,

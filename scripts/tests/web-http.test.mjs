@@ -4,7 +4,7 @@ import test from "node:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startHarnessWeb } from "../web.mjs";
-import { createWebFixture, MODEL_OUTPUT } from "./web-fixture.mjs";
+import { createWebFixture, createCatalogSyncFixture, MODEL_OUTPUT } from "./web-fixture.mjs";
 
 async function fixtureServer(action) {
 	const root = createWebFixture();
@@ -47,6 +47,35 @@ async function catalog(instance, cookie) {
 	return (await fetch(`${instance.origin}/api/catalog`, { headers: { cookie } })).json();
 }
 
+test("Web HTTP Catalog sync is authenticated, server-rooted and source-only", async () => {
+	const fixture = createCatalogSyncFixture();
+	const instance = await startHarnessWeb({ repo: fixture.repo, syncHome: fixture.home, models: [], piResources: {} });
+	try {
+		assert.equal((await fetch(`${instance.origin}/api/catalog-sync`)).status, 401);
+		const cookie = await authorize(instance);
+		const get = () => fetch(`${instance.origin}/api/catalog-sync`, { headers: { cookie } }).then(response => response.json());
+		const initial = await get();
+		assert.equal(initial.repo, fixture.repo);
+		assert.equal(initial.registration, null);
+		const registered = await post(instance, cookie, "/api/catalog-sync", { operation: "register", remote: "origin", branch: "main", automaticCheck: false, expectedHash: initial.registrationHash, repo: "/", engine: "/", home: "/" });
+		assert.equal(registered.status, 200, JSON.stringify(await registered.json()));
+		fixture.update("Updated HTTP configuration.\n");
+		const checked = await post(instance, cookie, "/api/catalog-sync", { operation: "check", force: true });
+		const review = await checked.json(); assert.equal(review.canSync, true, JSON.stringify(review));
+		assert.notEqual(fixture.git(fixture.repo, "rev-parse", "HEAD"), review.commit, "fetch is not apply");
+		assert.equal((await post(instance, cookie, "/api/catalog-sync", { operation: "apply" })).status, 409);
+		const applied = await post(instance, cookie, "/api/catalog-sync", { operation: "apply", expectedHash: review.registrationHash, expectedHead: review.head, expectedCommit: review.commit });
+		assert.equal(applied.status, 200, JSON.stringify(await applied.json()));
+		assert.equal(readFileSync(join(fixture.repo, "README.md"), "utf8"), "Updated HTTP configuration.\n");
+		assert.equal((await catalog(instance, cookie)).profiles.length, 3);
+		assert.equal((await post(instance, cookie, "/api/catalog-sync", { operation: "push" })).status, 400);
+		assert.equal((await fetch(`${instance.origin}/api/catalog-sync`, { headers: { cookie, origin: "https://evil.example" } })).status, 403);
+	} finally {
+		await new Promise(resolve => { instance.server.close(resolve); instance.server.closeAllConnections(); });
+		rmSync(fixture.root, { recursive: true, force: true });
+	}
+});
+
 test("Web HTTP rejects unauthorized, forged Host, malformed-cookie and cross-origin access", async () => {
 	await fixtureServer(async ({ instance }) => {
 		assert.equal((await fetch(`${instance.origin}/api/catalog`)).status, 401);
@@ -61,6 +90,10 @@ test("Web HTTP rejects unauthorized, forged Host, malformed-cookie and cross-ori
 		assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
 		assert.equal((await fetch(`${instance.origin}/api/doctor`, { method: "POST", headers: { cookie }, body: "{}" })).status, 403);
 		assert.equal((await fetch(`${instance.origin}/scripts/harness.mjs`)).status, 404);
+		const plans = await fetch(`${instance.origin}/resource-plans.js`);
+		assert.equal(plans.status, 200);
+		assert.match(await plans.text(), /export function createResourcePlan/);
+		assert.equal((await post(instance, cookie, "/api/install", { source: "untrusted" })).status, 404, "read-only task UI must not expose an installer");
 		assert.equal((await fetch(`${instance.origin}/`)).status, 200);
 		assert.equal((await post(instance, cookie, "/api/save-profile", null)).status, 400);
 		assert.equal((await post(instance, cookie, "/api/save-profile", { text: "x".repeat(2 * 1024 * 1024) })).status, 413);

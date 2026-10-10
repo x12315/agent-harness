@@ -23,7 +23,18 @@ writeFileSync(join(root, ".gitignore"), skills.map((name) => `!/skills/${name}/`
 const models = ["gpt-heavy", "gpt-medium", "gpt-ultralight", "gpt-6.1-sol"].map((id) => ({
 	provider: "openai-codex", id, thinkingLevels: ["off", "low", "medium", "high"],
 }));
-const instance = await startHarnessWeb({ repo: root, engine: root, models });
+const packagePath = join(root, "packages/fast");
+mkdirSync(packagePath, { recursive: true });
+writeFileSync(join(packagePath, "package.json"), JSON.stringify({ name: "@calesennett/pi-codex-fast", version: "0.0.0-fixture", description: "Synthetic Fast service tier extension; use only for UI tests.", pi: { extensions: ["index.ts"] } }));
+writeFileSync(join(packagePath, "index.ts"), "// Metadata only; never imported.\n");
+writeFileSync(join(root, "adapters/pi/extensions/harness-manager.ts"), "// Metadata only; never imported.\n");
+const source = "npm:@calesennett/pi-codex-fast@0.0.0-fixture";
+const piResources = {
+	packages: [{ source, path: packagePath }],
+	commands: [{ name: "codex-fast", description: "Toggle Fast mode", source: "extension", sourceInfo: { path: join(packagePath, "index.ts"), source, origin: "package", scope: "user" } }],
+	tools: [{ name: "subagent", description: `${"Synthetic child tool description. ".repeat(20)}FULL-TOOL-DESCRIPTION-END <img src=x onerror=alert(1)>`, parameters: { type: "object", required: ["task"], properties: { task: { type: "string", description: "Task for the child agent", default: "PRIVATE-TOOL-DEFAULT" } } }, sourceInfo: { path: join(root, "adapters/pi/extensions/subagent/index.ts"), source: "auto", origin: "top-level", scope: "user" } }],
+};
+const instance = await startHarnessWeb({ repo: root, engine: root, models, piResources });
 const statePath = process.argv[2];
 if (statePath) writeFileSync(statePath, JSON.stringify({ root, origin: instance.origin, url: instance.url, pid: process.pid }), { mode: 0o600 });
 console.log(`Isolated browser fixture started at ${instance.origin}`);

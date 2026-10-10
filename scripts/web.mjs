@@ -4,7 +4,7 @@ import { fork, spawn, spawnSync } from "node:child_process";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, resolve } from "node:path";
-import { isProfileName, readCatalog } from "./lib/web-catalog.mjs";
+import { isProfileName, parsePiPackageList, readCatalog } from "./lib/web-catalog.mjs";
 import { ENGINE, REPO, assertCatalog } from "./lib/repo.mjs";
 
 const MIME_TYPES = {
@@ -62,35 +62,43 @@ async function requestJson(request, limit = 2 * 1024 * 1024) {
 	}
 }
 
-function modelMetadata() {
+/** Decode only the marked RPC metadata response. Failures never expose raw stdout/stderr or credentials. */
+export function parsePiResourceProbe(result = {}) {
+	let metadata;
+	let failed = Boolean(result.error) || result.status !== 0 || Boolean(String(result.stderr ?? "").trim());
+	for (const line of String(result.stdout ?? "").split("\n")) {
+		try {
+			const event = JSON.parse(line);
+			if (event.type === "extension_error" || event.type === "response" && event.success === false || event.type === "extension_ui_request" && event.notifyType === "error") failed = true;
+			if (event.type !== "extension_ui_request" || event.method !== "notify") continue;
+			const value = JSON.parse(event.message);
+			if (value?.type === "harness-web-resources" && [value.models, value.tools, value.commands].every(Array.isArray)) metadata = value;
+		} catch { /* Ignore unrelated RPC events. */ }
+	}
+	return {
+		models: metadata?.models ?? [], tools: failed ? [] : metadata?.tools ?? [], commands: failed ? [] : metadata?.commands ?? [],
+		...(!metadata || failed || metadata.warning ? { warning: !failed && metadata?.warning === "tools-unavailable" ? "tools-unavailable" : "Pi resource probe failed or returned incomplete metadata." } : {}),
+	};
+}
+
+function piResourceMetadata() {
 	const env = { ...process.env, PI_OFFLINE: "1" };
 	delete env.PI_CODING_AGENT_DIR;
 	const result = spawnSync("pi", [
-		"--offline", "--no-extensions", "--extension", join(ENGINE, "scripts/probes/pi-web-models.ts"),
-		"--no-context-files", "--no-skills", "--no-tools", "--no-session", "--mode", "rpc",
+		"--offline", "--extension", join(ENGINE, "scripts/probes/pi-web-models.ts"),
+		"--no-context-files", "--no-skills", "--no-session", "--mode", "rpc",
 	], {
 		env,
-		cwd: REPO,
-		input: `${JSON.stringify({ id: "models", type: "prompt", message: "/harness-web-models" })}\n`,
+		cwd: ENGINE,
+		input: `${JSON.stringify({ id: "resources", type: "get_state" })}\n`,
 		encoding: "utf8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024,
 	});
-	for (const line of (result.stdout ?? "").split("\n")) {
-		try {
-			const event = JSON.parse(line);
-			if (event.type === "extension_ui_request" && event.method === "notify") return JSON.parse(event.message);
-		} catch { /* Ignore unrelated RPC events. */ }
-	}
-	return [];
-}
-
-function modelOutput() {
-	const result = spawnSync("pi", ["--offline", "--list-models"], {
-		env: { ...process.env, PI_OFFLINE: "1" },
-		encoding: "utf8",
-		timeout: 15_000,
-		maxBuffer: 1024 * 1024,
+	const resources = parsePiResourceProbe(result);
+	const packages = spawnSync("pi", ["list"], {
+		env, cwd: ENGINE, encoding: "utf8", timeout: 15_000, maxBuffer: 1024 * 1024,
 	});
-	return result.status === 0 ? result.stdout : "";
+	if (packages.status !== 0 || packages.error) resources.warning = "Pi package discovery failed; resource metadata may be incomplete.";
+	return { ...resources, packages: packages.status === 0 ? parsePiPackageList(packages.stdout) : [] };
 }
 
 function parseScopeModels(raw) {
@@ -134,7 +142,7 @@ function webRoot(repo) {
 
 function serveStatic(pathname, response) {
 	const route = pathname === "/" ? "/index.html" : pathname;
-	if (!/^\/(?:index\.html|styles\.css|app\.js)$/.test(route)) return false;
+	if (!/^\/(?:index\.html|styles\.css|app\.js|resource-plans\.js)$/.test(route)) return false;
 	const root = webRoot(ENGINE);
 	const file = resolve(root, `.${route}`);
 	if (!file.startsWith(`${resolve(root)}/`) || !existsSync(file) || !statSync(file).isFile()) return false;
@@ -161,7 +169,10 @@ function runCatalogWorker(message) {
 }
 
 /** Start an authenticated, loopback-only workbench. Returns server/closed for callers to stop it.
- * options.repo selects a read/write Catalog; modelOutput/models are credential-free test inputs.
+ * options.repo selects a read/write Catalog; modelOutput/models/piResources are credential-free test inputs.
+ * Explicit models/modelOutput disable native Pi discovery; piResources can inject an isolated directory.
+ * Discovery is cached per server; piResources uses readCatalog's public resource input contract.
+ * syncHome is a trusted caller-only native-state directory override for isolated tests, never an HTTP input.
  * No model turns are sent. All mutations run in workers sharing the Catalog transaction lock.
  */
 export async function startHarnessWeb(options = {}) {
@@ -176,6 +187,9 @@ export async function startHarnessWeb(options = {}) {
 	const scopeModels = options.scopeModels ?? parseScopeModels(process.env.HARNESS_MODEL_SCOPE);
 	let cachedModelOutput = options.modelOutput;
 	let cachedModels = options.models;
+	let cachedPiResources = options.piResources;
+	const syntheticModels = Object.hasOwn(options, "models") || Object.hasOwn(options, "modelOutput");
+	const syntheticResources = Object.hasOwn(options, "piResources");
 	let server;
 	const startedAt = new Date().toISOString();
 
@@ -224,9 +238,20 @@ export async function startHarnessWeb(options = {}) {
 			}
 			try {
 				if (request.method === "GET" && url.pathname === "/api/catalog") {
-					cachedModels ??= options.modelOutput === undefined ? modelMetadata() : [];
-					cachedModelOutput ??= cachedModels.length ? "" : modelOutput();
-					json(response, 200, { ok: true, repo, startedAt, ...readCatalog(repo, { modelOutput: cachedModelOutput, models: cachedModels, scopeModels }) });
+					cachedPiResources ??= syntheticModels || syntheticResources ? {} : piResourceMetadata();
+					if (!syntheticModels) cachedModels ??= cachedPiResources.models ?? [];
+					cachedModelOutput ??= "";
+					json(response, 200, { ok: true, repo, startedAt, ...readCatalog(repo, { modelOutput: cachedModelOutput, models: cachedModels, scopeModels, engine, piResources: cachedPiResources }) });
+					return;
+				}
+				if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/catalog-sync") {
+					const body = request.method === "POST" ? await requestJson(request) : { operation: "status" };
+					const result = await invokeWorker({ action: "catalog-sync", options: {
+						repo, home: options.syncHome, operation: request.method === "GET" ? "status" : body.operation,
+						remote: body.remote, branch: body.branch, automaticCheck: body.automaticCheck,
+						expectedHash: body.expectedHash, expectedHead: body.expectedHead, expectedCommit: body.expectedCommit, force: body.force === true,
+					} });
+					json(response, result.status, result);
 					return;
 				}
 				if (request.method === "POST" && ["/api/create-profile", "/api/delete-profile"].includes(url.pathname)) {

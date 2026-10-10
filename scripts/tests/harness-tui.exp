@@ -3,72 +3,102 @@ set timeout 30
 set engine [file normalize [file join [file dirname [info script]] "../.."]]
 set repo [exec node --input-type=module -e "import { createTuiFixture } from '$engine/scripts/tests/web-fixture.mjs'; console.log(createTuiFixture());"]
 set extension [file join $engine "adapters/pi/extensions/harness-manager.ts"]
+set readiness [file join $repo "harness-tui-ready.ts"]
+set ready_file [open $readiness w]
+puts $ready_file {export default function(pi) { pi.on("session_start", (_event, ctx) => ctx.ui.notify("HARNESS_TUI_READY", "info")); pi.registerCommand("tui-state", {description:"fixture state", handler: async (_args, ctx) => ctx.ui.notify("HARNESS_TUI_TOOLS=" + JSON.stringify(pi.getActiveTools()), "info")}); }}
+close $ready_file
 set profile heavy
 set keep_log [expr {$argc > 0}]
 set output [expr {$keep_log ? [lindex $argv 0] : [file join "/tmp" "harness-tui-smoke-[pid]-[clock clicks].log"]}]
 log_file -a -noappend $output
 log_user 0
 
+proc await_text {text} {
+	expect {
+		-exact $text {}
+		timeout { puts stderr "TUI smoke: expected text missing: $text"; exit 1 }
+		eof { puts stderr "TUI smoke: Pi exited before: $text"; exit 1 }
+	}
+}
+
+proc await_frame {} {
+	await_text "\033\[?2026l"
+}
+
 proc await_ready {} {
 	expect {
-		-exact "\033\[?2026l" {}
+		-exact "HARNESS_TUI_READY" {}
 		timeout { puts stderr "TUI smoke: initial render missing"; exit 1 }
 		eof { puts stderr "TUI smoke: Pi exited during startup"; exit 1 }
 	}
 }
 
-spawn env TERM=xterm-256color PI_OFFLINE=1 HARNESS_CATALOG=$repo pi --no-extensions --extension $extension --no-skills --no-session --offline
+spawn env TERM=xterm-256color PI_OFFLINE=1 HARNESS_CATALOG=$repo pi --no-extensions --extension $extension --extension $readiness --no-skills --no-session --offline
 await_ready
+await_frame
 send -- "/harness\r"
 expect {
 	-exact "Harness 管理面" {}
 	timeout { puts stderr "TUI smoke: main menu missing"; exit 1 }
 }
-expect -exact "逐项启停 repository 词条、选择详略、预览和编辑源码"
+await_text "逐项启停 repository 词条、选择详略、预览和编辑源码"
+await_frame
 send -- "\033\[B\r"
 expect {
 	-exact "AGENTS.md 常驻词条" {}
 	timeout { puts stderr "TUI smoke: instruction menu missing"; exit 1 }
 }
-expect -exact "每项可选精简、标准或详细说明"
+await_text "每项可选精简、标准或详细说明"
+await_frame
 send -- "\r"
 expect {
 	-exact "AGENTS.md 词条（mandatory 锁定）" {}
 	timeout { puts stderr "TUI smoke: entry list missing"; exit 1 }
 }
-expect -exact "不可关闭的安全边界"
+await_text "不可关闭的安全边界"
+await_frame
 send -- "\033"
-expect -exact "AGENTS.md 常驻词条"
+await_text "AGENTS.md 常驻词条"
+await_frame
 send -- "\033"
-expect -exact "Harness 管理面"
+await_text "Harness 管理面"
+await_frame
 send -- "\033"
-after 300
+await_frame
 send -- "/quit\r"
-expect eof
+expect {
+	eof {}
+	timeout { puts stderr "TUI smoke: Pi did not quit"; exit 1 }
+}
 
-spawn env TERM=xterm-256color PI_OFFLINE=1 HARNESS_CATALOG=$repo pi --no-extensions --extension $extension --no-skills --no-session --offline
+spawn env TERM=xterm-256color PI_OFFLINE=1 HARNESS_CATALOG=$repo pi --no-extensions --extension $extension --extension $readiness --no-skills --no-session --offline
 stty columns 48 rows 24
 await_ready
+await_frame
 send -- "/harness configure $profile\r"
 expect {
 	-exact {配置 } {}
 	timeout { puts stderr "TUI smoke: profile menu missing"; exit 1 }
 }
+await_frame
 send -- "\033\[B\r"
 expect {
 	-exact "Skills 开关" {}
 	timeout { puts stderr "TUI smoke: skills page missing"; exit 1 }
 }
-expect -exact "摘要上限：112 列"
+await_text "摘要上限：112 列"
+await_frame
 send -- "\033"
-expect -exact {配置 }
+await_text {配置 }
+await_frame
 send -- "\033"
-after 200
+await_frame
 send -- "/harness skills\r"
 expect {
 	-exact "Skills 目录（摘要列表）" {}
 	timeout { puts stderr "TUI smoke: Skills catalog missing"; exit 1 }
 }
+await_frame
 send -- "\r"
 expect {
 	-exact "Skill 详情 · agent-browser" {}
@@ -78,14 +108,79 @@ expect {
 	-exact "↑↓ 滚动" {}
 	timeout { puts stderr "TUI smoke: Skill detail scroll hint missing"; exit 1 }
 }
+await_frame
 send -- "\033"
 expect {
 	-exact "Skills 目录（摘要列表）" {}
 	timeout { puts stderr "TUI smoke: Skill detail did not return"; exit 1 }
 }
-close
-wait
+await_frame
+send -- "\033"
+await_frame
+send -- "/quit\r"
+expect {
+	eof {}
+	timeout { puts stderr "TUI smoke: Skill browser did not return to Pi input"; exit 1 }
+}
+
+# Reuse the synthetic Catalog with an isolated native HOME and the real switch runtime.
+exec node -e {
+	const fs = require("node:fs"), path = require("node:path"), cp = require("node:child_process");
+	const [root, engine] = process.argv.slice(1), home = path.join(root, "home");
+	fs.rmSync(path.join(root, "adapters/pi/extensions"), {recursive:true});
+	fs.mkdirSync(path.join(root, "adapters/pi/extensions"));
+	fs.mkdirSync(path.join(root, "adapters/codex"), {recursive:true});
+	fs.writeFileSync(path.join(root, "adapters/codex/AGENTS.md"), "Fixture Codex entry.\n");
+	fs.writeFileSync(path.join(root, "adapters/pi/settings.json"), JSON.stringify({packages:[], skills:["-{{HOME}}/.pi/agent/skills/profile-config/SKILL.md"]}));
+	for (const name of ["heavy", "medium", "ultralight"]) {
+		const file = path.join(root, "profiles", name + ".json"), value = JSON.parse(fs.readFileSync(file));
+		delete value.adapters.pi.model;
+		value.adapters.pi.tools = name === "heavy" ? [] : ["read"];
+		fs.writeFileSync(file, JSON.stringify(value));
+	}
+	const env = {...process.env, HOME:home, HARNESS_CATALOG:root, PI_OFFLINE:"1"};
+	delete env.PI_CODING_AGENT_DIR;
+	for (const args of [["compose", "--apply"], ["bootstrap", "--apply"]]) cp.execFileSync(process.execPath, [path.join(engine, "bin/harness"), ...args], {env, timeout:15000});
+	fs.mkdirSync(path.join(home, ".pi/agent/skills"), {recursive:true});
+	for (const name of ["long-skill", "short-skill", "agent-browser"]) fs.symlinkSync(path.join(root, "skills", name), path.join(home, ".pi/agent/skills", name));
+	const settings = path.join(home, ".pi/agent/settings.json"), value = JSON.parse(fs.readFileSync(settings));
+	value.defaultProjectTrust = "never";
+	fs.writeFileSync(settings, JSON.stringify(value));
+} $repo $engine
+spawn env -u PI_CODING_AGENT_DIR -u PI_PROFILE_SWITCH_DIR TERM=xterm-256color PI_OFFLINE=1 HOME=[file join $repo home] HARNESS_CATALOG=$repo node [file join $engine bin/pi-h] --offline --no-session --extension $readiness
+await_ready
+await_text "普通模式 · 未选择工作方案"
+await_frame
+send -- "/harness\r"
+await_text "Harness 管理面 · 当前：普通模式"
+await_frame
+# Switch is the sixth menu item; Heavy is the first Catalog profile.
+send -- "\033\[B\033\[B\033\[B\033\[B\033\[B\r"
+await_text "选择当前会话的工作方案"
+await_frame
+send -- "\r"
+await_text "Reloaded keybindings, extensions, skills, prompts, themes, and context files"
+await_frame
+send -- "/tui-state\r"
+await_text {HARNESS_TUI_TOOLS=[]}
+await_frame
+send -- "/harness\r"
+await_text {Harness 管理面 · 当前：Heavy fixture [heavy]}
+await_frame
+send -- "\033"
+await_frame
+send -- "/harness switch medium\r"
+await_text "Reloaded keybindings, extensions, skills, prompts, themes, and context files"
+await_frame
+send -- "/tui-state\r"
+await_text {HARNESS_TUI_TOOLS=["read"]}
+await_frame
+send -- "/quit\r"
+expect {
+	eof {}
+	timeout { puts stderr "TUI smoke: switched runtime did not return to Pi input"; exit 1 }
+}
 log_file
 file delete -force $repo
 if {!$keep_log} { file delete -force $output }
-puts "harness TUI smoke: OK (including narrow Skill summary/detail view)"
+puts "harness TUI smoke: OK (including narrow Skills, menu/command hot switch, zero tools and usable Pi input)"

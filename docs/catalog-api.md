@@ -41,13 +41,17 @@ Pi 全局规则通过 Catalog AGENTS 投影发现；Codex 每个 Profile 的 `de
 
 Web API（仅 loopback、临时授权、同源检查）：
 
-- `GET /api/catalog`：资源、源码 SHA-256、模型 scope；不返回凭据。
+- `GET /api/catalog`：资源、源码 SHA-256、模型 scope；不返回凭据。附加只读 `managementContext`（Engine/Skill 位置、官方 skills CLI 固定版本）和 Skill `management`（白名单/lock 推导的归属、位置、无凭据仓库地址）；不是文件存在、版本可信或已加载的证明。
 - `POST /api/save-profile`、`/api/save-instructions`、`/api/save-instruction-text`：值 + 来源 hash CAS。
 - `POST /api/create-profile`、`/api/delete-profile`：新建不覆盖；删除 hash CAS 且至少保留一项。
 - `POST /api/doctor`：完整检查；保存本身只执行受影响项检查。
+- `GET /api/catalog-sync`：本机登记、来源/HEAD/候选、已审阅文件、阻断原因；不 fetch。
+- `POST /api/catalog-sync`：`operation: register|check|apply`；登记用 `expectedHash` CAS；apply 另需 `expectedHead`、`expectedCommit`。只同步服务选定的 Catalog；请求不能选择 repo/Engine/状态目录。自动检查可选、节流 15 分钟，不自动 apply；成功的 `synced: true, needsApply: true` 仅指源码快进，不指运行时或 doctor 通过。范围、快照与异常恢复见 Web 文档。
 - `POST /api/shutdown`：停止服务，不影响工作会话。
 
 保存返回 `ok`、阶段 logs/耗时和 `validation`（`full: false`）；失败含 status，正常回滚有 `rollbackVerified`，外部改动不覆盖。服务端重新规划影响范围，不接受客户端跳过检查。端口 cookie、Host/Origin/CSP、锁与恢复契约见 Web 文档。
+
+Web 的安装管理表单仅在浏览器生成待核验的 AI 任务，无安装/卸载 HTTP 写入路由，不接受 shell 命令，不联网取得新来源。引用影响基于已保存声明，执行前由人工批准 agent 的具体计划并重新核验。增加安装执行接口时必须另行设计归属、锁/CAS、快照、官方工具行为与失败恢复，不能把现有只读表单解释为执行授权。
 
 ## 投影归属
 
