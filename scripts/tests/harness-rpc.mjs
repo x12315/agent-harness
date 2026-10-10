@@ -148,6 +148,48 @@ async function runScenario({ root, name, prompt, steps, verify }) {
 
 const root = createFixture();
 try {
+const menuActions = [];
+await runScenario({
+	root,
+	name: "menu-shortcuts",
+	prompt: "/harness",
+	steps: [
+		{ method: "select", title: /Harness 管理面/, choose: "帮助与快捷命令", before: event => menuActions.push(...event.options.slice(0, -1)) },
+		{ method: "select", title: /Harness 管理面/, choose: "退出管理面" },
+	],
+	verify: ({ notifications }) => {
+		const help = notifications.find(message => message.startsWith("Harness 管理面"));
+		assert.ok(help?.includes("/harness 是主入口"));
+		const shortcuts = [...help.matchAll(/^\/harness (\w+)(?: \[id\])?\s+(.+)$/gm)];
+		assert.equal(shortcuts.length, menuActions.length, "every shortcut must have a menu action");
+		for (const [, name, text] of shortcuts) {
+			const label = text.split(" · ")[0];
+			assert.ok(menuActions.some(option => option.startsWith(label + " — ")), `shortcut ${name} is missing from the menu`);
+		}
+	},
+});
+await runScenario({
+	root,
+	name: "native-pi-menu-switch",
+	prompt: "/harness",
+	steps: [
+		{ method: "select", title: /当前：原生 Pi/, choose: "切换当前工作方案" },
+		{ method: "select", title: /选择当前会话的工作方案/, choose: "Medium fixture" },
+		{ method: "select", title: /Harness 管理面/, choose: "退出管理面" },
+	],
+	verify: ({ notifications }) => {
+		assert.ok(notifications.some(message => message.includes("当前是普通 Pi 会话") && message.includes("pi-h")));
+	},
+});
+await runScenario({
+	root,
+	name: "native-pi-command-switch",
+	prompt: "/harness switch medium",
+	steps: [],
+	verify: ({ notifications }) => {
+		assert.ok(notifications.some(message => message.includes("当前是普通 Pi 会话") && message.includes("pi-h")));
+	},
+});
 await runScenario({
 	root,
 	name: "skill-description",

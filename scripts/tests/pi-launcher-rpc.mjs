@@ -20,6 +20,7 @@ let stderr = "";
 const pending = new Map();
 const events = [];
 let sequence = 0;
+let selectResponse;
 const kill = () => { if (child?.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ } } };
 const deadline = setTimeout(kill, 35_000);
 try {
@@ -64,6 +65,10 @@ export default function(pi) {let plan;pi.on('session_start',()=>{plan=JSON.parse
       if (!line) continue;
       try {
         const event = JSON.parse(line); events.push(event);
+        if (event.type === "extension_ui_request" && event.method === "select" && selectResponse) {
+          const value = selectResponse(event);
+          child.stdin.write(JSON.stringify({ type: "extension_ui_response", id: event.id, ...(value ? { value } : { cancelled: true }) }) + "\n");
+        }
         if (event.type === "agent_start") { kill(); throw new Error("unexpected model turn"); }
         const request = pending.get(event.id);
         if (event.type === "response" && request) { pending.delete(event.id); event.success ? request.resolve(event) : request.reject(new Error(JSON.stringify(event))); }
@@ -112,11 +117,24 @@ export default function(pi) {let plan;pi.on('session_start',()=>{plan=JSON.parse
   assert.ok(firstCommands.includes("skill:short-skill") && firstCommands.includes("skill:long-skill"));
   assert.ok(!firstCommands.includes("skill:profile-config"));
   assert.equal(JSON.parse(readFileSync(savedPath, "utf8")).activeProfile, "heavy", "ordinary startup must not persist default");
-  await switchWork("default", "medium");
+  const menuStart = events.length;
+  const menuDialogs = [];
+  selectResponse = event => {
+    menuDialogs.push(event);
+    const prefix = menuDialogs.length === 1 ? "切换当前工作方案" : menuDialogs.length === 2 ? "Medium fixture" : undefined;
+    if (!prefix) return undefined;
+    const option = event.options.find(option => option.startsWith(prefix));
+    assert.ok(option, `missing menu option ${prefix}: ${JSON.stringify(event)}`);
+    return option;
+  };
+  await request("prompt", { message: "/harness" });
+  await waitEvent(menuStart, event => event.message?.startsWith("profile switched: default → medium"));
   // The plan is written before reload finishes. Readiness must include live policy, not just the file's profile name.
   let medium;
   for (let attempt = 0; attempt < 50; attempt++) { await new Promise(resolve => setTimeout(resolve, 40)); medium = await snapshot(); if (medium.profile === "medium" && JSON.stringify(medium.tools) === '["read"]' && /Standard Implementation\./.test(medium.prompt)) break; }
   assert.equal(medium.profile, "medium", JSON.stringify(events.slice(-10)));
+  selectResponse = undefined;
+  assert.equal(menuDialogs.length, 2, "menu switch must return to Pi instead of reopening a dialog on the outgoing runtime");
   assert.deepEqual(medium.tools, ["read"]);
   assert.equal(events.filter(event => event.method === "setWidget" && event.widgetKey === "harness-profile-hint").at(-1)?.widgetLines, undefined, "selected work profiles clear the startup guidance");
   assert.equal(events.filter(event => event.method === "setStatus" && event.statusKey === "profile").at(-1)?.statusText, "profile: medium", "named profiles keep upstream status instead of the ordinary-mode label");
@@ -144,13 +162,29 @@ export default function(pi) {let plan;pi.on('session_start',()=>{plan=JSON.parse
   assert.equal(restored.profile, "medium");
   assert.deepEqual(restored.tools, ["read"], "switching between work profiles restores their declared tools");
   assert.equal(readFileSync(settingsPath, "utf8"), beforeSettings, "settings must remain untouched");
+  const cancelledStart = events.length;
+  let cancelledDialogs = 0;
+  selectResponse = event => {
+    cancelledDialogs++;
+    if (cancelledDialogs === 1) return event.options.find(option => option.startsWith("切换当前工作方案"));
+    if (cancelledDialogs === 3) assert.match(event.title, /当前：Medium fixture \[medium\]/);
+    return undefined;
+  };
+  await request("prompt", { message: "/harness" });
+  await waitEvent(cancelledStart, event => event.type === "extension_ui_request" && event.method === "select" && /Harness 管理面/.test(event.title) && cancelledDialogs === 3);
+  assert.equal((await snapshot()).profile, "medium", "cancelled menu selection must retain the current profile");
+  selectResponse = undefined;
+  const invalidStart = events.length;
+  await request("prompt", { message: "/harness switch missing-fixture-profile" });
+  await waitEvent(invalidStart, event => event.message?.includes("未知 Profile：missing-fixture-profile"));
+  assert.equal((await snapshot()).profile, "medium");
   assert.equal(events.some(event => event.type === "agent_start" || event.type === "extension_error"), false);
   // No authentication is seeded, so the scoped available-model list is empty even though explicit CLI model selection works.
   assert.ok(stderr.trim(), "isolated model scope should report unavailable credentials");
   for (const line of stderr.trim().split("\n")) assert.match(line, /^Warning: No models match pattern "openai\/gpt-5\*"$/);
   child.stdin.end();
   assert.deepEqual(await closed, { code: 0, signal: null });
-  console.log("Pi launcher RPC: OK (default, native arguments, settings/scope, hot switch, resource removal, same session, failed switch, zero tools; model_requests=0)");
+  console.log("Pi launcher RPC: OK (default, native arguments, settings/scope, command/menu hot switch, menu cancellation, resource removal, same session, failed switch, zero tools; model_requests=0)");
 } finally {
   clearTimeout(deadline);
   kill();

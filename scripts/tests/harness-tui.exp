@@ -5,7 +5,7 @@ set repo [exec node --input-type=module -e "import { createTuiFixture } from '$e
 set extension [file join $engine "adapters/pi/extensions/harness-manager.ts"]
 set readiness [file join $repo "harness-tui-ready.ts"]
 set ready_file [open $readiness w]
-puts $ready_file {export default function(pi) { pi.on("session_start", (_event, ctx) => ctx.ui.notify("HARNESS_TUI_READY", "info")); }}
+puts $ready_file {export default function(pi) { pi.on("session_start", (_event, ctx) => ctx.ui.notify("HARNESS_TUI_READY", "info")); pi.registerCommand("tui-state", {description:"fixture state", handler: async (_args, ctx) => ctx.ui.notify("HARNESS_TUI_TOOLS=" + JSON.stringify(pi.getActiveTools()), "info")}); }}
 close $ready_file
 set profile heavy
 set keep_log [expr {$argc > 0}]
@@ -114,9 +114,73 @@ expect {
 	-exact "Skills 目录（摘要列表）" {}
 	timeout { puts stderr "TUI smoke: Skill detail did not return"; exit 1 }
 }
-close
-wait
+await_frame
+send -- "\033"
+await_frame
+send -- "/quit\r"
+expect {
+	eof {}
+	timeout { puts stderr "TUI smoke: Skill browser did not return to Pi input"; exit 1 }
+}
+
+# Reuse the synthetic Catalog with an isolated native HOME and the real switch runtime.
+exec node -e {
+	const fs = require("node:fs"), path = require("node:path"), cp = require("node:child_process");
+	const [root, engine] = process.argv.slice(1), home = path.join(root, "home");
+	fs.rmSync(path.join(root, "adapters/pi/extensions"), {recursive:true});
+	fs.mkdirSync(path.join(root, "adapters/pi/extensions"));
+	fs.mkdirSync(path.join(root, "adapters/codex"), {recursive:true});
+	fs.writeFileSync(path.join(root, "adapters/codex/AGENTS.md"), "Fixture Codex entry.\n");
+	fs.writeFileSync(path.join(root, "adapters/pi/settings.json"), JSON.stringify({packages:[], skills:["-{{HOME}}/.pi/agent/skills/profile-config/SKILL.md"]}));
+	for (const name of ["heavy", "medium", "ultralight"]) {
+		const file = path.join(root, "profiles", name + ".json"), value = JSON.parse(fs.readFileSync(file));
+		delete value.adapters.pi.model;
+		value.adapters.pi.tools = name === "heavy" ? [] : ["read"];
+		fs.writeFileSync(file, JSON.stringify(value));
+	}
+	const env = {...process.env, HOME:home, HARNESS_CATALOG:root, PI_OFFLINE:"1"};
+	delete env.PI_CODING_AGENT_DIR;
+	for (const args of [["compose", "--apply"], ["bootstrap", "--apply"]]) cp.execFileSync(process.execPath, [path.join(engine, "bin/harness"), ...args], {env, timeout:15000});
+	fs.mkdirSync(path.join(home, ".pi/agent/skills"), {recursive:true});
+	for (const name of ["long-skill", "short-skill", "agent-browser"]) fs.symlinkSync(path.join(root, "skills", name), path.join(home, ".pi/agent/skills", name));
+	const settings = path.join(home, ".pi/agent/settings.json"), value = JSON.parse(fs.readFileSync(settings));
+	value.defaultProjectTrust = "never";
+	fs.writeFileSync(settings, JSON.stringify(value));
+} $repo $engine
+spawn env -u PI_CODING_AGENT_DIR -u PI_PROFILE_SWITCH_DIR TERM=xterm-256color PI_OFFLINE=1 HOME=[file join $repo home] HARNESS_CATALOG=$repo node [file join $engine bin/pi-h] --offline --no-session --extension $readiness
+await_ready
+await_text "普通模式 · 未选择工作方案"
+await_frame
+send -- "/harness\r"
+await_text "Harness 管理面 · 当前：普通模式"
+await_frame
+# Switch is the sixth menu item; Heavy is the first Catalog profile.
+send -- "\033\[B\033\[B\033\[B\033\[B\033\[B\r"
+await_text "选择当前会话的工作方案"
+await_frame
+send -- "\r"
+await_text "Reloaded keybindings, extensions, skills, prompts, themes, and context files"
+await_frame
+send -- "/tui-state\r"
+await_text {HARNESS_TUI_TOOLS=[]}
+await_frame
+send -- "/harness\r"
+await_text {Harness 管理面 · 当前：Heavy fixture [heavy]}
+await_frame
+send -- "\033"
+await_frame
+send -- "/harness switch medium\r"
+await_text "Reloaded keybindings, extensions, skills, prompts, themes, and context files"
+await_frame
+send -- "/tui-state\r"
+await_text {HARNESS_TUI_TOOLS=["read"]}
+await_frame
+send -- "/quit\r"
+expect {
+	eof {}
+	timeout { puts stderr "TUI smoke: switched runtime did not return to Pi input"; exit 1 }
+}
 log_file
 file delete -force $repo
 if {!$keep_log} { file delete -force $output }
-puts "harness TUI smoke: OK (including narrow Skill summary/detail view)"
+puts "harness TUI smoke: OK (including narrow Skills, menu/command hot switch, zero tools and usable Pi input)"
