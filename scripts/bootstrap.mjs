@@ -8,10 +8,13 @@
  *
  * Exit 0 only when every projection is in place afterwards.
  */
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { atomicWrite } from "./lib/atomic-write.mjs";
 import { pathToFileURL } from "node:url";
-import { ENGINEERING_SETTING_KEYS, LOCAL_PI_SETTINGS, REPO, engineeringPiSettings, managedLinks, pins, projectionSource, isSymlink, relTarget, staleManagedLinks } from "./lib/repo.mjs";
+import { assertConfigurationWrite } from "./lib/configuration-write-guard.mjs";
+import { ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, REPO, engineeringPiSettings, managedLinks, pins, projectionSource, isSymlink, relTarget, staleManagedLinks } from "./lib/repo.mjs";
 
 /**
  * Relative link target computed from the directory's REAL path.
@@ -26,13 +29,14 @@ export function run({ apply = false, json = false } = {}) {
   const actions = [];
   for (const target of staleManagedLinks()) {
     actions.push({ source: "(removed generated profile)", target, action: "remove", detail: "dangling symlink to a removed repo profile" });
-    if (apply) rmSync(target, { force: true });
+    if (apply) { assertConfigurationWrite(target, HOME); rmSync(target, { force: true }); }
   }
   for (const [src, target] of managedLinks()) {
     const source = projectionSource(src);
     const record = (action, detail) => actions.push({ source: src, target, action, detail });
 
     if (!existsSync(source)) { record("skip", "source missing in repo"); continue; }
+    if (apply) assertConfigurationWrite(target, HOME);
     mkdirSync(dirname(target), { recursive: true });
     let realDir = dirname(target);
     try { realDir = realpathSync(dirname(target)); } catch { /* keep literal */ }
@@ -40,14 +44,14 @@ export function run({ apply = false, json = false } = {}) {
 
     if (!existsSync(target) && !isSymlink(target)) {
       record("create", want);
-      if (apply) symlinkSync(want, target);
+      if (apply) replaceProjection(target, want);
       continue;
     }
     if (lstatSync(target).isSymbolicLink()) {
       const current = readlinkSync(target);
       if (current === want) { record("ok", current); continue; }
       record("fix", `${current} -> ${want}`);
-      if (apply) { rmSync(target, { force: true }); symlinkSync(want, target); }
+      if (apply) replaceProjection(target, want);
       continue;
     }
     record(
@@ -110,33 +114,33 @@ export function settingsMatch(currentText, desired) {
  */
 export function mergeSettings({ apply = false } = {}) {
   const engineering = engineeringPiSettings();
+  const expectedHash = process.env.HARNESS_EXPECTED_PI_SETTINGS_HASH;
 
   const legacy = existsSync(LOCAL_PI_SETTINGS) && lstatSync(LOCAL_PI_SETTINGS).isSymbolicLink();
   let personal = {};
-  if (existsSync(LOCAL_PI_SETTINGS)) {
+  const currentText = readFileSyncOrMissing(LOCAL_PI_SETTINGS);
+  if (currentText !== null) {
     try {
-      const current = JSON.parse(readFileSync(LOCAL_PI_SETTINGS, "utf8"));
-      for (const [k, v] of Object.entries(current)) {
-        if (!ENGINEERING_SETTING_KEYS.includes(k)) personal[k] = v;
-      }
+      const current = JSON.parse(currentText);
+      if (!current || typeof current !== "object" || Array.isArray(current)) throw new Error("Invalid native settings object");
+      personal = Object.fromEntries(Object.entries(current).filter(([key]) => !Object.hasOwn(engineering, key)));
     } catch {
-      /* unreadable: treat as no personalization rather than clobbering blindly */
+      throw new Error("Native Pi settings are unreadable or invalid; personalization was not replaced.");
     }
   }
   const desired = { ...personal, ...engineering };
   const serialized = `${JSON.stringify(desired, null, 2)}\n`;
-  let currentText = null;
-  try {
-    currentText = readFileSync(LOCAL_PI_SETTINGS, "utf8");
-  } catch {
-    /* missing */
+  if (expectedHash && createHash("sha256").update(currentText ?? "null").digest("hex") !== expectedHash) {
+    throw Object.assign(new Error("Native Pi settings changed during synchronization; stopped without replacing them."), { code: "ECHANGED" });
   }
-
   const action = legacy ? "convert" : currentText === null ? "create" : settingsMatch(currentText, desired) ? "ok" : "merge";
   if (apply && action !== "ok") {
+    assertConfigurationWrite(LOCAL_PI_SETTINGS, HOME);
     mkdirSync(dirname(LOCAL_PI_SETTINGS), { recursive: true });
+    if (readFileSyncOrMissing(LOCAL_PI_SETTINGS) !== currentText) throw new Error("Native Pi settings changed before writing.");
     if (legacy) rmSync(LOCAL_PI_SETTINGS, { force: true });
-    writeFileSync(LOCAL_PI_SETTINGS, serialized);
+    if (currentText === null || legacy) writeFileSync(LOCAL_PI_SETTINGS, serialized, { flag: "wx", mode: 0o600 });
+    else atomicWrite(LOCAL_PI_SETTINGS, serialized, `${process.pid}-settings`, currentText, () => assertConfigurationWrite(LOCAL_PI_SETTINGS, HOME));
   }
   // A legacy symlink can only carry what its target holds. Once the shared file
   // was trimmed to engineering keys, converting the symlink yields a file with
@@ -150,6 +154,22 @@ export function mergeSettings({ apply = false } = {}) {
       ? `symlink -> real file (engineering + ${personalKeys.length} personal setting(s))`
       : "symlink -> real file; the shared file carries NO personalization, so this machine's model/provider/theme are not recovered by this conversion - set them again if they were not already lost";
   return [{ target: LOCAL_PI_SETTINGS, action, detail }];
+}
+
+function replaceProjection(target, want) {
+  assertConfigurationWrite(target, HOME);
+  const temporary = `${target}.harness-${process.pid}.tmp`;
+  let created = false;
+  try {
+    symlinkSync(want, temporary); created = true;
+    assertConfigurationWrite(target, HOME);
+    renameSync(temporary, target);
+  } finally { if (created) rmSync(temporary, { force: true }); }
+}
+
+function readFileSyncOrMissing(path) {
+  try { return readFileSync(path, "utf8"); }
+  catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 
 export function nextSteps() {

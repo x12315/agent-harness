@@ -168,6 +168,19 @@ await runScenario({
 		}
 	},
 });
+for (const viaMenu of [true, false]) await runScenario({
+	root,
+	name: viaMenu ? "app-updates-menu" : "app-updates-shortcut",
+	prompt: viaMenu ? "/harness" : "/harness updates",
+	steps: viaMenu ? [
+		{ method: "select", title: /Harness 管理面/, choose: "检查应用新版本" },
+		{ method: "select", title: /Harness 管理面/, choose: "退出管理面" },
+	] : [],
+	verify: ({ notifications }) => {
+		assert.ok(notifications.some(message => message.includes("fixture harness: OK")));
+	},
+});
+assert.equal(readFileSync(join(root, "calls.log"), "utf8").split("\n").filter(line => line === "updates --check").length, 2, "app update menu and shortcut share the same CLI operation");
 await runScenario({
 	root,
 	name: "native-pi-menu-switch",

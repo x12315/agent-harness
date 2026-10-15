@@ -37,7 +37,7 @@ Pi 全局规则通过 Catalog AGENTS 投影发现；Codex 每个 Profile 的 `de
 
 使用 `harness --catalog=<path> <command>`。`status --json` 返回 `ok`、`engine`、`catalog`、`interfaceVersion: 1`、两仓 Git 状态、资源与投影统计。数据源与执行源始终不同：保存、检查、Web 静态文件、worker、runtime 探针来自 Engine，读写目标属于指定 Catalog。
 
-`harness [--catalog=<path>] pi [Pi arguments]` 与 `pi-h` 启动可切换的普通 Pi。`pi` 后的参数是原生 Pi 输入，不再解析 Catalog 选择；新入口只接受已激活的匹配投影，不自动改 HOME 或声明。启动不保存默认方案选择，仍复用固定版本上游 runtime；详细行为与边界见 Engine README。
+`harness [--catalog=<path>] pi [Pi arguments]` 与 `pi-h` 启动可切换的普通 Pi。`pi` 后的参数是原生 Pi 输入，不再解析 Catalog 选择；新入口只接受已激活的匹配投影，不自动改 HOME 或声明。启动读取本机按 Catalog 隔离的默认 Pi 方案，未设置则为普通模式，不恢复上游最后选择；启动本身不保存偏好。`harness profile default [<id>|none]` / Pi `/harness default [id|none]` 管理偏好，仍复用固定版本上游 runtime；详细行为与边界见 Engine README。
 
 Web API（仅 loopback、临时授权、同源检查）：
 
@@ -45,8 +45,12 @@ Web API（仅 loopback、临时授权、同源检查）：
 - `POST /api/save-profile`、`/api/save-instructions`、`/api/save-instruction-text`：值 + 来源 hash CAS。
 - `POST /api/create-profile`、`/api/delete-profile`：新建不覆盖；删除 hash CAS 且至少保留一项。
 - `POST /api/doctor`：完整检查；保存本身只执行受影响项检查。
-- `GET /api/catalog-sync`：本机登记、来源/HEAD/候选、已审阅文件、阻断原因；不 fetch。
-- `POST /api/catalog-sync`：`operation: register|check|apply`；登记用 `expectedHash` CAS；apply 另需 `expectedHead`、`expectedCommit`。只同步服务选定的 Catalog；请求不能选择 repo/Engine/状态目录。自动检查可选、节流 15 分钟，不自动 apply；成功的 `synced: true, needsApply: true` 仅指源码快进，不指运行时或 doctor 通过。范围、快照与异常恢复见 Web 文档。
+- `GET /api/startup-profile`：只读本机默认 Pi 启动方案；返回 `profile: null|string`、`preferencesHash`、`missing`。未设置为普通模式，不创建文件；所选源码被删时保留选择并标缺失，不自动换方案。
+- `POST /api/startup-profile`：显式 `profile: null|<id>` 与 `expectedHash`；只接受服务端固定 Catalog/Engine/HOME，不使用请求根目录。按 Catalog/source/偏好文件锁、完整文本 CAS、父目录保护和 0600 原子写保存到 `~/.local/state/harness/startup-profile/<canonical-catalog-hash>.json`，不能放在两仓内。非法状态/源码/symlink 拒绝，冲突不覆盖；不生成、不安装、不改 native settings/auth/当前会话，未保存草稿不纳入。只有下次 `pi-h` / `harness pi` 使用；显式启动方案优先。
+- `GET /api/catalog-sync`：本机登记、来源/HEAD/候选、已审阅文件、阻断原因；不 fetch。返回语义 `summary`（配置条目、安装声明变化及缺失资源）、当前提交的 `application` 阶段结果。仅实际适用于当前/候选路径的 Git 过滤器阻断；未使用的全局 LFS 声明不会阻断。`dirty: null` 表示未执行工作树检查，`canSync: false` 并给出原因；探测失败停止，不执行过滤器。只有成功应用后记录的精确生成物哈希可被视为受管派生产物，外部编辑不忽略。
+- `POST /api/catalog-sync`：`operation: register|check|apply|sync`；登记用 `expectedHash` CAS；apply/sync 另需 `expectedHead`、`expectedCommit`，同时固定审阅时的本地分支。只处理服务选定 Catalog/Engine/HOME；请求不能选择执行根或状态目录。自动请求标记 `automatic: true`，服务端核验 opt-in、节流 15 分钟，仅检查。apply 保持源码快进，`synced: true, needsApply: true` 不代表已生效。sync 在同一锁内重新比较安装声明及资源存在性；有安装变化或缺失就返回 `installationRequired`，不快进或安装。否则保留 0600 原生/生成物快照、规范化精确受管生成物，再快进（或应用同 HEAD 配置），依次运行可信 Engine compose/bootstrap/verify --catalog；返回 `configurationApplied`、`needsReload`、`phases`、`configurationBackup`。验证为 `catalog-static, full: false`，不加载运行时、不验收包内容；子阶段最多 60 秒，配置阶段总预算 120 秒，Git 阶段 60 秒。无效/旧 symlink 设置、父目录 symlink、原生实体及 archive 属性造成的备份缺失先拒绝；实际写入重查目的状态，保留未声明工程键和个性化。失败保留部分成功、私有阶段日志与恢复路径，不自动 reset/回滚覆盖。范围见 Web 文档。
+- `GET /api/engine-updates`：离线读取服务选定 Engine 的版本、HEAD、缓存候选、历史比较和失败状态，独立于 Catalog 同步。
+- `POST /api/engine-updates`：`operation: configure|check`；configure 使用 `automaticCheck` + `expectedHash` CAS，check 可显式 `force: true` 绕过 15 分钟节流；自动请求标记 `automatic: true`，服务端在锁内重读偏好，关闭后旧页面不能继续自动联网。只检查 Engine 已登记的 origin/main；请求不能选择 Engine、来源、分支或 HOME。成功获取不安装、不 merge、不重启；`hasUpdate` 仅在本地提交是候选祖先时为 true。来源变化使缓存失效，失败保留带时间与 `checkFailed` 的旧结果。状态与 opt-in 偏好在本机 `~/.local/state/harness/engine-updates/`，不进入任何仓。
 - `POST /api/shutdown`：停止服务，不影响工作会话。
 
 保存返回 `ok`、阶段 logs/耗时和 `validation`（`full: false`）；失败含 status，正常回滚有 `rollbackVerified`，外部改动不覆盖。服务端重新规划影响范围，不接受客户端跳过检查。端口 cookie、Host/Origin/CSP、锁与恢复契约见 Web 文档。

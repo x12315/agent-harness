@@ -3,7 +3,7 @@ import test from "node:test";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mapChecks, runCheckCommand } from "../lib/check-runner.mjs";
+import { mapChecks, runCheckCommand, verificationEnvironment } from "../lib/check-runner.mjs";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -42,6 +42,28 @@ test("Async command checks preserve stdin, failures, spawn errors, timeouts and 
   assert.equal(timedOut.error.killed, true);
   const overflow = await runCheckCommand(process.execPath, ["-e", "process.stdout.write('x'.repeat(4096))"], { maxBuffer: 32 });
   assert.notEqual(overflow.status, 0);
+});
+
+test("Verification children use native Pi resources without changing the parent's Profile environment", async () => {
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = "/fixture/restricted-profile";
+  try {
+    assert.equal(verificationEnvironment().PI_CODING_AGENT_DIR, undefined);
+    const overrides = { PI_CODING_AGENT_DIR: "/fixture/other-profile", HARNESS_CHECK_FIXTURE: "preserved" };
+    for (const env of [undefined, overrides]) {
+      const result = await runCheckCommand(process.execPath, ["-e", "console.log(JSON.stringify({nested:!!process.env.PI_CODING_AGENT_DIR,offline:process.env.PI_OFFLINE,fixture:process.env.HARNESS_CHECK_FIXTURE}))"], { env, timeout: 5000 });
+      assert.ifError(result.error);
+      const actual = JSON.parse(result.stdout);
+      assert.equal(actual.nested, false);
+      assert.equal(actual.offline, "1");
+      if (env) assert.equal(actual.fixture, "preserved");
+      assert.equal(process.env.PI_CODING_AGENT_DIR, "/fixture/restricted-profile");
+    }
+    assert.equal(overrides.PI_CODING_AGENT_DIR, "/fixture/other-profile");
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  }
 });
 
 test("Harness awaits async verification and JSON doctor retains the entire gate", async () => {

@@ -3,11 +3,12 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { compose } from "./compose.mjs";
+import { verificationEnvironment } from "./lib/check-runner.mjs";
 
 const profile = [...compose().profiles.keys()].sort()[0];
 if (!profile) throw new Error("No Profile is available for the control-plane canary.");
 const child = spawn("pi-profile", [profile, "--", "--mode", "rpc", "--no-session", "--offline"], {
-  env: { ...process.env, PI_OFFLINE: "1" },
+  env: verificationEnvironment(),
   stdio: ["pipe", "pipe", "pipe"],
   detached: process.platform !== "win32",
 });

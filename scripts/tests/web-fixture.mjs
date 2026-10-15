@@ -63,6 +63,8 @@ export function createWebFixture() {
 	mkdirSync(join(root, "scripts/lib"), { recursive: true });
 	copyFileSync(new URL("../compose.mjs", import.meta.url), join(root, "scripts/compose.mjs"));
 	copyFileSync(new URL("../lib/repo.mjs", import.meta.url), join(root, "scripts/lib/repo.mjs"));
+	copyFileSync(new URL("../lib/configuration-write-guard.mjs", import.meta.url), join(root, "scripts/lib/configuration-write-guard.mjs"));
+	copyFileSync(new URL("../lib/atomic-write.mjs", import.meta.url), join(root, "scripts/lib/atomic-write.mjs"));
 	writeJson(join(root, ".skill-lock.json"), { skills: {} });
 	writeFileSync(join(root, ".gitignore"), "!/skills/long-skill/\n!/skills/short-skill/\n");
 	writeFileSync(join(root, "scripts/harness.mjs"), `import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -97,17 +99,41 @@ console.log("fixture " + command + ": OK");
 	return root;
 }
 
-/** Data-only Git Catalog + registered local source for sync HTTP/browser tests. No native credentials. */
+/** Scope Git tests to a disposable HOME/config; return a restore callback for the test process.
+ * Workers inherit this environment, while production Git config inspection remains unchanged.
+ */
+export function isolateGitEnvironment(home) {
+	const keys = [...new Set(["HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", ...Object.keys(process.env).filter(key => key.startsWith("GIT_"))])];
+	const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+	for (const key of keys) delete process.env[key];
+	Object.assign(process.env, { HOME: home, XDG_CONFIG_HOME: join(home, ".config"), GIT_CONFIG_GLOBAL: join(home, ".gitconfig"), GIT_CONFIG_NOSYSTEM: "1" });
+	return () => {
+		for (const [key, value] of Object.entries(previous)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	};
+}
+
+/** Data-only Git Catalog + registered local source for sync HTTP/browser tests. No native credentials.
+ * Call restoreEnvironment after closing the server to restore the caller's HOME/Git environment.
+ */
 export function createCatalogSyncFixture() {
 	const seed = createWebFixture();
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "harness-sync-web-")));
 	const source = join(root, "source"), repo = join(root, "catalog"), home = join(root, "home");
 	cpSync(seed, source, { recursive: true });
 	rmSync(seed, { recursive: true, force: true });
-	for (const path of ["scripts", "schemas", "tmp"]) rmSync(join(source, path), { recursive: true, force: true });
+	for (const path of ["scripts", "schemas", "tmp", "adapters/pi/extensions"]) rmSync(join(source, path), { recursive: true, force: true });
+	mkdirSync(join(source, "adapters/pi/extensions"), { recursive: true });
+	writeFileSync(join(source, "adapters/pi/extensions/sync-fixture.ts"), "// Metadata-only personal resource; never imported in static sync.\n");
 	writeFileSync(join(source, ".gitignore"), "*.harness.lock\n/skills/*\n!/skills/long-skill/\n!/skills/short-skill/\n");
 	writeFileSync(join(source, "README.md"), "Synthetic configuration repository.\n");
+	writeJson(join(source, "adapters/pi/settings.json"), { packages: [], skills: [] });
+	mkdirSync(join(source, "adapters/codex"), { recursive: true });
+	writeFileSync(join(source, "adapters/codex/AGENTS.md"), "# Synthetic Codex entry\n");
 	mkdirSync(home);
+	const restoreEnvironment = isolateGitEnvironment(home);
 	const git = (directory, ...args) => execFileSync("git", ["-C", directory, "-c", "core.hooksPath=/dev/null", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 	git(source, "init", "-b", "main");
 	git(source, "config", "user.name", "Fixture"); git(source, "config", "user.email", "fixture@example.test");
@@ -117,7 +143,7 @@ export function createCatalogSyncFixture() {
 		writeFileSync(join(source, "README.md"), text);
 		git(source, "add", "README.md"); git(source, "commit", "-m", "fixture: catalog update");
 	};
-	return { root, repo, source, home, git, update };
+	return { root, repo, source, home, git, update, restoreEnvironment };
 }
 
 /** Isolated data for real TUI probes; no user's Catalog or authentication is copied. */

@@ -26,6 +26,25 @@ export function repositoryUrl(source) {
 	} catch { return null; }
 }
 
+/** Build read-only review URLs from a registered source, never a default author's repository.
+ * Only GitHub's known URL layout gets branch/commit/compare/releases links. Local, credentialed
+ * or unsupported sources get no invented review URLs; hashes must be full Git object IDs.
+ */
+export function repositoryReviewLinks(source, { branch, head, commit } = {}) {
+	const repository = repositoryUrl(source);
+	const links = { repository, branch: null, commit: null, compare: null, releases: null };
+	if (!repository) return links;
+	const url = new URL(repository);
+	if (url.origin !== "https://github.com" || !/^\/[A-Za-z0-9_-][A-Za-z0-9._-]*\/[A-Za-z0-9_-][A-Za-z0-9._-]*\/?$/.test(url.pathname)) return links;
+	const root = repository.replace(/\/$/, "");
+	const objectId = value => /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value ?? "");
+	links.releases = `${root}/releases`;
+	if (typeof branch === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,160}$/.test(branch)) links.branch = `${root}/tree/${encodeURIComponent(branch)}`;
+	if (objectId(commit)) links.commit = `${root}/commit/${commit}`;
+	if (objectId(head) && objectId(commit) && head !== commit) links.compare = `${root}/compare/${head}...${commit}`;
+	return links;
+}
+
 /** Describe lifecycle ownership, not the author or the currently loaded runtime. */
 export function resourceOwnership(entry, kind) {
 	if (entry.sourceRedacted) return "来源已脱敏 · 原始安装记录待核验";

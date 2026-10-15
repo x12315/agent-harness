@@ -123,10 +123,11 @@ expect {
 	timeout { puts stderr "TUI smoke: Skill browser did not return to Pi input"; exit 1 }
 }
 
-# Reuse the synthetic Catalog with an isolated native HOME and the real switch runtime.
+# Reuse the synthetic Catalog; preference state must be outside Catalog/Engine.
+set home [exec node -e {console.log(require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "harness-tui-home-")));}]
 exec node -e {
 	const fs = require("node:fs"), path = require("node:path"), cp = require("node:child_process");
-	const [root, engine] = process.argv.slice(1), home = path.join(root, "home");
+	const [root, engine, home] = process.argv.slice(1);
 	fs.rmSync(path.join(root, "adapters/pi/extensions"), {recursive:true});
 	fs.mkdirSync(path.join(root, "adapters/pi/extensions"));
 	fs.mkdirSync(path.join(root, "adapters/codex"), {recursive:true});
@@ -146,16 +147,16 @@ exec node -e {
 	const settings = path.join(home, ".pi/agent/settings.json"), value = JSON.parse(fs.readFileSync(settings));
 	value.defaultProjectTrust = "never";
 	fs.writeFileSync(settings, JSON.stringify(value));
-} $repo $engine
-spawn env -u PI_CODING_AGENT_DIR -u PI_PROFILE_SWITCH_DIR TERM=xterm-256color PI_OFFLINE=1 HOME=[file join $repo home] HARNESS_CATALOG=$repo node [file join $engine bin/pi-h] --offline --no-session --extension $readiness
+} $repo $engine $home
+spawn env -u PI_CODING_AGENT_DIR -u PI_PROFILE_SWITCH_DIR TERM=xterm-256color PI_OFFLINE=1 HOME=$home HARNESS_CATALOG=$repo node [file join $engine bin/pi-h] --offline --no-session --extension $readiness
 await_ready
 await_text "普通模式 · 未选择工作方案"
 await_frame
 send -- "/harness\r"
 await_text "Harness 管理面 · 当前：普通模式"
 await_frame
-# Switch is the sixth menu item; Heavy is the first Catalog profile.
-send -- "\033\[B\033\[B\033\[B\033\[B\033\[B\r"
+# Switch is the seventh menu item; Heavy is the first Catalog profile.
+send -- "\033\[B\033\[B\033\[B\033\[B\033\[B\033\[B\r"
 await_text "选择当前会话的工作方案"
 await_frame
 send -- "\r"
@@ -181,6 +182,6 @@ expect {
 	timeout { puts stderr "TUI smoke: switched runtime did not return to Pi input"; exit 1 }
 }
 log_file
-file delete -force $repo
+file delete -force $repo $home
 if {!$keep_log} { file delete -force $output }
 puts "harness TUI smoke: OK (including narrow Skills, menu/command hot switch, zero tools and usable Pi input)"

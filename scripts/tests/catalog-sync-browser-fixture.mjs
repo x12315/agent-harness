@@ -12,4 +12,5 @@ writeFileSync(process.argv[2], JSON.stringify({ ...Object.fromEntries(Object.ent
 console.log(`Catalog sync fixture started at ${instance.origin}`);
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => { instance.server.close(); instance.server.closeAllConnections(); });
 await instance.closed;
+fixture.restoreEnvironment();
 rmSync(fixture.root, { recursive: true, force: true });

@@ -37,9 +37,7 @@ export function compareDoctorBenchmarks(current, baseline) {
 }
 
 function benchmarkCommand(command, args, options) {
-  const env = { ...process.env, ...options?.env, PI_OFFLINE: "1" };
-  delete env.PI_CODING_AGENT_DIR;
-  return runCheckCommand(command, args, { ...options, env });
+  return runCheckCommand(command, args, options);
 }
 
 async function git(repo, args) {

@@ -25,6 +25,8 @@ import {
 import { basename, dirname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ENGINE, HOME, REPO, assertCatalog, classify } from "./lib/repo.mjs";
+import { assertConfigurationWrite } from "./lib/configuration-write-guard.mjs";
+import { atomicWrite } from "./lib/atomic-write.mjs";
 
 const INSTRUCTIONS = join(REPO, "instructions");
 const PROFILES = join(REPO, "profiles");
@@ -323,19 +325,21 @@ export function run({ apply = false, json = false } = {}) {
   }
   const expected = new Set(state.outputs.keys());
   const stale = generatedFiles().filter((path) => !expected.has(path));
-  const changes = [];
+  const changes = [], previous = new Map();
   for (const [path, content] of state.outputs) {
     const current = existsSync(path) ? readFileSync(path, "utf8") : null;
+    previous.set(path, current);
     if (current !== content) changes.push({ path, action: current === null ? "create" : "update" });
   }
   for (const path of stale) changes.push({ path, action: "remove" });
 
   if (apply) {
-    for (const path of stale) rmSync(path, { force: true });
+    for (const path of stale) { assertConfigurationWrite(path, REPO); rmSync(path, { force: true }); }
     for (const { path, action } of changes) {
       if (action === "remove") continue;
+      assertConfigurationWrite(path, REPO);
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, state.outputs.get(path));
+      atomicWrite(path, state.outputs.get(path), `${process.pid}-compose`, previous.get(path), () => assertConfigurationWrite(path, REPO));
     }
   }
   const ok = apply || changes.length === 0;

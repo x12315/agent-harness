@@ -52,9 +52,9 @@ export function assertCatalog(root = REPO) {
 }
 
 /** Exact source of a native projection: executable assets belong to the engine, data to the Catalog. */
-export function projectionSource(path) {
-  if (path === "bin/harness" || path === "bin/pi-h" || (path.startsWith("adapters/pi/extensions/") && existsSync(join(ENGINE, path)))) return join(ENGINE, path);
-  return join(REPO, path);
+export function projectionSource(path, root = REPO, engine = ENGINE) {
+  if (path === "bin/harness" || path === "bin/pi-h" || (path.startsWith("adapters/pi/extensions/") && existsSync(join(engine, path)))) return join(engine, path);
+  return join(root, path);
 }
 export const SKILLS_DIR = join(REPO, "skills");
 /** Engineering declaration (shared, versioned). Personalization must NOT live here. */
@@ -78,7 +78,9 @@ export function engineeringPiSettings() {
     ? value.map(expand)
     : typeof value === "string"
       ? value.replaceAll("{{HOME}}", HOME)
-      : value;
+      : value && typeof value === "object"
+        ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, expand(entry)]))
+        : value;
   return Object.fromEntries(ENGINEERING_SETTING_KEYS.filter((key) => key in shared).map((key) => [key, expand(shared[key])]));
 }
 export const lockSkills = (root = REPO) => readJson(join(root, ".skill-lock.json")).skills ?? {};
@@ -148,12 +150,14 @@ export function findStaleManagedLinks(targetDir, sourceRoot, suffix = "") {
 }
 
 /** Removed generated files can leave dangling native projections after a catalog migration. */
-export function staleManagedLinks() {
-  return findStaleManagedLinks(join(HOME, ".codex"), join(REPO, "adapters/codex/profiles"), ".config.toml");
+export function staleManagedLinks(root = REPO, home = HOME) {
+  return findStaleManagedLinks(join(home, ".codex"), join(root, "adapters/codex/profiles"), ".config.toml");
 }
 
 /** Every path we manage: [repo-relative source, absolute projection target]. */
-export function managedLinks() {
+export function managedLinks(root = REPO, home = HOME, engine = ENGINE) {
+  const REPO = root, HOME = home, ENGINE = engine;
+  const PI_PROFILE_SWITCH_ROOT = join(home, ".pi-profile-switch");
   const links = [
     ["bin/harness", join(HOME, ".local/bin/harness")],
     ["bin/pi-h", join(HOME, ".local/bin/pi-h")],

@@ -1,10 +1,14 @@
 import { applyCatalogJson, applyCatalogMarkdown, createCatalogProfile, deleteCatalogProfile, runCatalogDoctor } from "./catalog-transaction.mjs";
 
 import { runCatalogSync } from "./catalog-sync.mjs";
+import { runEngineUpdates } from "./engine-updates.mjs";
+import { runStartupProfile } from "./startup-profile.mjs";
 
 process.once("message", (message) => {
 	try {
-		const result = message.action === "catalog-sync" ? runCatalogSync(message.options) : message.action === "doctor"
+		const result = message.action === "startup-profile" ? runStartupProfile(message.options)
+			: message.action === "engine-updates" ? runEngineUpdates(message.options)
+			: message.action === "catalog-sync" ? runCatalogSync(message.options) : message.action === "doctor"
 			? runCatalogDoctor(message.repo, message.engine)
 			: message.action === "create-profile" ? createCatalogProfile(message.options)
 			: message.action === "delete-profile" ? deleteCatalogProfile(message.options)

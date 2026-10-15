@@ -5,11 +5,7 @@ import { redactResourceText, repositoryUrl } from "../../web/resource-plans.js";
 
 export const DETAIL_LEVELS = ["brief", "standard", "detailed"];
 
-/** Profile IDs are filenames and launch identifiers; schema/default names are reserved. */
-export function isProfileName(name) {
-	return typeof name === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)
-		&& !["default", "profile.schema"].includes(name.toLowerCase());
-}
+export { isProfileName } from "./profile-name.mjs";
 
 export function hashText(text) {
 	return createHash("sha256").update(text).digest("hex");
@@ -52,7 +48,7 @@ export function parseSkillDescription(markdown) {
 function skillCategory(name) {
 	if (["git-commit", "make-repo-contribution"].includes(name)) return "Git";
 	if (["ponytail", "self-explanatory-code"].includes(name)) return "编码规范";
-	if (["agent-browser", "lark-doc", "lark-drive", "lark-wiki", "lark-sheets", "lark-base", "lark-meeting"].includes(name)) return "检索";
+	if (name === "agent-browser") return "检索";
 	if (name.startsWith("lark-")) return "飞书";
 	if (["frontend-design", "ui-ux-pro-max", "macos-design", "implementing-drag-drop"].includes(name)) return "设计";
 	return "其他";

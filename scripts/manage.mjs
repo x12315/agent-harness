@@ -4,6 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { compose, inspect } from "./compose.mjs";
+import { runStartupProfile } from "./lib/startup-profile.mjs";
 import { ENGINE, HOME, REPO, LOCAL_PI_SETTINGS, PI_PROFILE_CONFIG_SKILL, assertCatalog, classify, isInsideRepo, isSymlink, managedLinks, pins, projectionSource } from "./lib/repo.mjs";
 
 const have = (command) => spawnSync("sh", ["-c", `command -v ${command}`], { encoding: "utf8" }).status === 0;
@@ -113,6 +114,7 @@ export function showStatus({ json = false } = {}) {
   if (report.skills.unregistered.length) console.log(`\n  unregistered skills: ${report.skills.unregistered.join(", ")}`);
   console.log("\n常用操作");
   console.log("  harness profile list|show <name>|edit <name>");
+  console.log("  harness profile default [<name>|none]    # default Pi startup; none = ordinary");
   console.log("  pi-h / harness pi [Pi arguments]    # switch-ready ordinary Pi");
   console.log("  harness run <pi|codex> <profile>");
   console.log("  harness apply    # compose, project, and verify");
@@ -141,7 +143,10 @@ export function editProfile(name) {
   return result.status ?? 1;
 }
 
-/** Launch switch-ready ordinary Pi; native Pi arguments, cwd and exit status are preserved. No Catalog or user settings are rewritten. */
+/** Launch Pi with this Catalog's local startup choice (ordinary when unset).
+ * Native arguments/cwd/signals remain opaque; missing or stale selected configurations fail closed.
+ * No startup preference, native settings, approval or current session is rewritten.
+ */
 export async function runPi(piArgs = []) {
   try {
     assertCatalog();
@@ -160,7 +165,15 @@ export async function runPi(piArgs = []) {
     }
     const settings = JSON.parse(readFileSync(LOCAL_PI_SETTINGS, "utf8"));
     if (!Array.isArray(settings.skills) || !settings.skills.includes(`-${PI_PROFILE_CONFIG_SKILL}`)) throw new Error("ordinary Pi must exclude profile-config in its native settings before using pi-h");
-    const child = spawn("pi-profile", ["default", "--", "--extension", join(HOME, ".pi/agent/extensions/harness-manager.ts"), ...piArgs], { stdio: "inherit", env: { ...process.env, HARNESS_CATALOG: REPO } });
+    const startup = runStartupProfile({ catalog: REPO });
+    if (!startup.ok) throw new Error(startup.error);
+    if (startup.missing) throw new Error("默认启动方案已不存在；请在 Web 重新选择，或运行 harness profile default none。不会自动换成其他权限方案。");
+    if (startup.profile) {
+      const generated = join(REPO, "adapters/pi/profiles", `${startup.profile}.json`);
+      const expected = compose().outputs.get(generated);
+      if (!expected || !existsSync(generated) || isSymlink(generated) || realpathSync(generated) !== generated || readFileSync(generated, "utf8") !== expected) throw new Error("默认启动方案的生成配置缺失或过期；请先显式执行 harness compose --apply。");
+    }
+    const child = spawn("pi-profile", [startup.profile ?? "default", "--", "--extension", join(HOME, ".pi/agent/extensions/harness-manager.ts"), ...piArgs], { stdio: "inherit", env: { ...process.env, HARNESS_CATALOG: REPO } });
     const interrupt = () => child.kill("SIGINT");
     const terminate = () => child.kill("SIGTERM");
     process.on("SIGINT", interrupt);
@@ -227,10 +240,12 @@ Usage:
   harness profile show <name>          Inspect one profile
   harness profile edit <name>          Edit source, then apply and verify
   harness profile path <name>          Print the source file path
-  pi-h / harness pi [pi args...]      Launch switch-ready ordinary Pi
+  harness profile default [<name>|none] [--json]  Set/read the local Pi startup choice
+  pi-h / harness pi [pi args...]      Launch Pi with the local startup choice
   harness run pi <name> [pi args...]   Launch Pi through the profile runtime
   harness run codex <name> [args...]   Launch Codex with its native profile
   harness web                          Open the local composition workbench
+  harness updates [--check] [--json]   Inspect Engine versions; --check fetches origin/main without applying
   harness apply                        Compose, project, and verify
   harness [--catalog=<path>] doctor [--serial]            Run the full gate (bounded parallel by default)
   harness benchmark [--runs=3] [--out=<dir>]  Measure serial/parallel full doctor

@@ -6,12 +6,12 @@ import { acquireCatalogLock, atomicWrite, releaseCatalogLock } from "../../adapt
 import { hashText, isProfileName } from "./web-catalog.mjs";
 import { scanText } from "../secret-scan.mjs";
 import { planCatalogValidation } from "./catalog-validation.mjs";
+import { verificationEnvironment } from "./check-runner.mjs";
 
 import { ENGINE, assertCatalog } from "./repo.mjs";
 
 function runHarness(repo, args, timeout = 600_000, engine = ENGINE) {
-	const env = { ...process.env, HARNESS_CATALOG: repo, PI_OFFLINE: "1" };
-	delete env.PI_CODING_AGENT_DIR;
+	const env = verificationEnvironment({ HARNESS_CATALOG: repo });
 	const result = spawnSync(process.execPath, [join(engine, "scripts", "harness.mjs"), ...args], {
 		cwd: repo, env, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024,
 	});

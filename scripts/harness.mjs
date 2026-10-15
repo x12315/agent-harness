@@ -8,6 +8,7 @@
  *   profile     list/show/edit declared profiles
  *   pi          launch switch-ready ordinary Pi with native arguments
  *   run         launch Pi or Codex with a declared profile
+ *   updates     inspect cached Engine version; --check explicitly fetches origin/main
  *   web         open the local Harness composition workbench
  *   apply       compose, project, and verify
  *   doctor      run the read-only full verification
@@ -74,6 +75,15 @@ if (command === "status") {
   if (!action || action === "list") code = showProfiles(undefined, options);
   else if (action === "show") code = showProfiles(argv[2], options);
   else if (action === "path") code = showProfilePath(argv[2]);
+  else if (action === "default") {
+    const { runStartupProfile } = await import("./lib/startup-profile.mjs");
+    let result = runStartupProfile({ catalog: CATALOG });
+    const choice = argv.slice(2).find(argument => !argument.startsWith("-"));
+    if (choice !== undefined && result.ok) result = runStartupProfile({ catalog: CATALOG, operation: "configure", profile: choice === "none" ? null : choice, expectedHash: argv.find(argument => argument.startsWith("--expected-hash="))?.slice(16) ?? result.preferencesHash });
+    if (options.json) console.log(JSON.stringify(result, null, 2));
+    else console.log(result.error ?? `默认 Pi 启动方案：${result.profile ?? "普通模式"}${result.missing ? "（已不存在，请重新选择）" : ""}。仅影响下次 pi-h / harness pi，不切换当前会话。`);
+    code = result.ok ? 0 : 1;
+  }
   else if (action === "edit") {
     code = editProfile(argv[2]);
     if (code === 0) code = await runChecks({ ...options, apply: true });
@@ -92,6 +102,17 @@ if (command === "status") {
     port: portArg ? Number(portArg.slice("--port=".length)) : 0,
     open: !argv.includes("--no-open"),
   });
+} else if (command === "updates") {
+  const { runEngineUpdates } = await import("./lib/engine-updates.mjs");
+  const result = runEngineUpdates({ catalog: CATALOG, operation: argv.includes("--check") ? "check" : "status", force: argv.includes("--check") });
+  if (options.json) console.log(JSON.stringify(result, null, 2));
+  else {
+    console.log(result.error ?? result.message);
+    if (result.head) console.log(`Engine: ${result.version} (${result.head})\nRemote: origin/main ${result.remoteVersion ?? "unknown"} (${result.commit ?? "not checked"})`);
+    if (result.dirty) console.log("工具仓有本地修改；检查不会覆盖它们。更新前请自行处理。");
+    if (result.checkedAt) console.log(`最近成功检查: ${result.checkedAt}`);
+  }
+  code = result.ok ? 0 : 1;
 } else if (command === "benchmark") {
   const { run } = await import("./benchmark-doctor.mjs");
   code = await run(argv.slice(1));

@@ -9,12 +9,12 @@ const tests = [
 	{
 		name: "catalog state",
 		command: process.execPath,
-		args: ["--test", join(REPO, "scripts/tests/catalog.test.mjs"), join(REPO, "scripts/tests/check-runner.test.mjs"), join(REPO, "scripts/tests/benchmark-metrics.test.mjs"), join(REPO, "scripts/tests/catalog-contract.test.mjs"), join(REPO, "scripts/tests/pi-launcher.test.mjs"), join(REPO, "scripts/tests/runtime-validation.test.mjs"), join(REPO, "scripts/tests/catalog-sync.test.mjs")],
+		args: ["--test", "--test-concurrency=2", join(REPO, "scripts/tests/catalog.test.mjs"), join(REPO, "scripts/tests/check-runner.test.mjs"), join(REPO, "scripts/tests/benchmark-metrics.test.mjs"), join(REPO, "scripts/tests/catalog-contract.test.mjs"), join(REPO, "scripts/tests/pi-launcher.test.mjs"), join(REPO, "scripts/tests/runtime-validation.test.mjs"), join(REPO, "scripts/tests/catalog-sync.test.mjs"), join(REPO, "scripts/tests/catalog-sync-summary.test.mjs"), join(REPO, "scripts/tests/catalog-sync-activation.test.mjs"), join(REPO, "scripts/tests/configuration-write-guard.test.mjs"), join(REPO, "scripts/tests/engine-updates.test.mjs"), join(REPO, "scripts/tests/safe-git.test.mjs"), join(REPO, "scripts/tests/startup-profile.test.mjs")],
 	},
 	{
 		name: "Web HTTP + transactions",
 		command: process.execPath,
-		args: ["--test", join(REPO, "scripts/tests/catalog-validation.test.mjs"), join(REPO, "scripts/tests/web-catalog.test.mjs"), join(REPO, "scripts/tests/web-http.test.mjs"), join(REPO, "scripts/tests/resource-plans.test.mjs")],
+		args: ["--test", "--test-concurrency=2", join(REPO, "scripts/tests/catalog-validation.test.mjs"), join(REPO, "scripts/tests/web-catalog.test.mjs"), join(REPO, "scripts/tests/web-http.test.mjs"), join(REPO, "scripts/tests/resource-plans.test.mjs"), join(REPO, "scripts/tests/skill-selection.test.mjs"), join(REPO, "scripts/tests/startup-profile-http.test.mjs")],
 	},
 	{
 		name: "Web browser syntax",

@@ -531,3 +531,18 @@ test("Web doctor delegates to the same Harness verification path", () => {
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("All lark-* Skills belong to 飞书 while agent-browser remains 检索", () => {
+	const root = createWebFixture();
+	try {
+		const larkNames = ["lark-doc", "lark-base", "lark-wiki", "lark-other"];
+		for (const name of [...larkNames, "agent-browser"]) {
+			const directory = join(root, "skills", name);
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Synthetic category fixture.\n---\n`);
+		}
+		const catalog = readCatalog(root, { engine: root, models: [] });
+		for (const name of larkNames) assert.equal(catalog.skills.find(skill => skill.name === name)?.category, "飞书", name);
+		assert.equal(catalog.skills.find(skill => skill.name === "agent-browser")?.category, "检索");
+	} finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -6,12 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCatalogSync } from "../lib/catalog-sync.mjs";
 import { ENGINE } from "../lib/repo.mjs";
+import { isolateGitEnvironment } from "./web-fixture.mjs";
 
 const git = (root, ...args) => execFileSync("git", ["-C", root, "-c", "core.hooksPath=/dev/null", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 function fixture(action) {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "harness-config-sync-")));
 	const source = join(root, "source"), repo = join(root, "catalog"), home = join(root, "home");
 	mkdirSync(source); mkdirSync(home);
+	const restoreEnvironment = isolateGitEnvironment(home);
 	git(source, "init", "-b", "main");
 	git(source, "config", "user.name", "Fixture"); git(source, "config", "user.email", "fixture@example.test");
 	writeFileSync(join(source, "harness.catalog.json"), '{"schemaVersion":1}\n');
@@ -27,7 +29,7 @@ function fixture(action) {
 		writeFileSync(join(source, path), text); git(source, "add", "--force", path); git(source, "commit", "-m", "fixture: update config");
 	};
 	try { return action({ root, source, repo, home, invoke, register, update }); }
-	finally { rmSync(root, { recursive: true, force: true }); }
+	finally { restoreEnvironment(); rmSync(root, { recursive: true, force: true }); }
 }
 
 function apply(invoke, review, overrides = {}) {
@@ -110,7 +112,15 @@ test("Symlinks, hooks, custom filters, ignored-file collisions and automatic che
 	const hooks = join(repo, ".git/hooks"); mkdirSync(hooks, { recursive: true });
 	const marker = join(repo, "hook-ran"); writeFileSync(join(hooks, "post-merge"), `#!/bin/sh\ntouch '${marker}'\n`); chmodSync(join(hooks, "post-merge"), 0o755);
 	git(repo, "config", "filter.untrusted.smudge", "touch should-never-run");
+	writeFileSync(join(repo, ".git/info/attributes"), "README.md filter=untrusted\n");
 	assert.match(apply(invoke, first).error, /过滤器/); git(repo, "config", "--remove-section", "filter.untrusted");
+	git(repo, "config", "--global", "filter.global-untrusted.smudge", "touch should-never-run");
+	writeFileSync(join(repo, ".git/info/attributes"), "README.md filter=global-untrusted\n");
+	assert.match(apply(invoke, first).error, /过滤器/, "applicable global filters remain unsafe in production");
+	git(repo, "config", "--global", "--remove-section", "filter.global-untrusted");
+	rmSync(join(repo, ".git/info/attributes"));
+	git(repo, "config", "--global", "filter.lfs.clean", "touch should-never-run");
+	assert.equal(invoke({}).dirty, false, "unused global LFS declarations do not block data-only synchronization");
 	assert.equal(apply(invoke, first).ok, true); assert.equal(existsSync(marker), false);
 	writeFileSync(join(source, ".gitignore"), "*.harness.lock\n/skills/*\n!/skills/example/\n");
 	git(source, "add", ".gitignore");
@@ -122,6 +132,16 @@ test("Symlinks, hooks, custom filters, ignored-file collisions and automatic che
 	assert.equal(readFileSync(join(repo, "skills/example/SKILL.md"), "utf8"), "Ignored installation to preserve.\n");
 	symlinkSync("/tmp", join(source, "profiles-link")); git(source, "add", "profiles-link"); git(source, "commit", "-m", "fixture: unsafe link");
 	const linked = invoke({ operation: "check", force: true }); assert.equal(linked.canSync, false);
+}));
+
+test("Catalog status exposes source metadata but never executes custom clean filters; automatic checks respect server opt-in", () => fixture(({ root, repo, invoke, register, update }) => {
+	register(); update();
+	assert.equal(invoke({ operation: "check", automatic: true, force: true }).commit, null, "disabled automatic checking cannot fetch");
+	const marker = join(root, "filter-ran"), script = join(root, "clean-filter");
+	writeFileSync(join(repo, ".gitattributes"), "README.md filter=fixture\n"); git(repo, "add", "."); git(repo, "commit", "-m", "fixture: filter attributes");
+	writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\n/bin/cat\n`); chmodSync(script, 0o755);
+	git(repo, "config", "filter.fixture.clean", script); writeFileSync(join(repo, "README.md"), "Different configuration.\n");
+	const result = invoke({}); assert.equal(result.status, 200); assert.equal(result.dirty, null); assert.equal(result.canSync, false); assert.equal(result.remotes[0].supported, true); assert.match(result.blocked, /过滤器/); assert.equal(existsSync(marker), false);
 }));
 
 test("Engine identity and caller Git redirects cannot change the sync target", () => fixture(({ repo, invoke }) => {

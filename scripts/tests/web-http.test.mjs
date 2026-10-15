@@ -72,7 +72,32 @@ test("Web HTTP Catalog sync is authenticated, server-rooted and source-only", as
 		assert.equal((await fetch(`${instance.origin}/api/catalog-sync`, { headers: { cookie, origin: "https://evil.example" } })).status, 403);
 	} finally {
 		await new Promise(resolve => { instance.server.close(resolve); instance.server.closeAllConnections(); });
+		fixture.restoreEnvironment();
 		rmSync(fixture.root, { recursive: true, force: true });
+	}
+});
+
+test("Web lightweight configuration sync is explicit, server-rooted and statically applied without installers", async () => {
+	const fixture = createCatalogSyncFixture();
+	const instance = await startHarnessWeb({ repo: fixture.repo, syncHome: fixture.home, models: [], piResources: {} });
+	try {
+		const cookie = await authorize(instance);
+		const initial = await fetch(`${instance.origin}/api/catalog-sync`, { headers: { cookie } }).then(response => response.json());
+		assert.equal((await post(instance, cookie, "/api/catalog-sync", { operation: "register", remote: "origin", branch: "main", automaticCheck: false, expectedHash: initial.registrationHash })).status, 200);
+		fixture.update("Semantic HTTP sync update.\n");
+		const review = await post(instance, cookie, "/api/catalog-sync", { operation: "check", force: true }).then(response => response.json());
+		assert.equal(review.summary.entries[0].kind, "documentation");
+		const approval = { operation: "sync", expectedHash: review.registrationHash, expectedHead: review.head, expectedCommit: review.commit, repo: "/", home: "/", engine: fixture.repo, summary: { requiresInstallation: false } };
+		assert.equal((await post(instance, cookie, "/api/catalog-sync", { ...approval, automatic: true })).status, 409);
+		assert.equal(fixture.git(fixture.repo, "rev-parse", "HEAD"), review.head);
+		const response = await post(instance, cookie, "/api/catalog-sync", approval), result = await response.json();
+		assert.equal(response.status, 200, JSON.stringify(result)); assert.equal(result.configurationApplied, true); assert.equal(result.needsReload, true);
+		assert.deepEqual(result.validation, { kind: "catalog-static", full: false }); assert.equal(result.phases.length, 3);
+		assert.match(readFileSync(join(fixture.home, ".pi/agent/settings.json"), "utf8"), /packages/);
+		assert.equal((await catalog(instance, cookie)).profiles.length, 3);
+	} finally {
+		await new Promise(resolve => { instance.server.close(resolve); instance.server.closeAllConnections(); });
+		fixture.restoreEnvironment(); rmSync(fixture.root, { recursive: true, force: true });
 	}
 });
 

@@ -20,7 +20,7 @@ import { pathToFileURL } from "node:url";
 import { buildAgentToolArgs } from "../adapters/pi/extensions/subagent/tool-policy.mjs";
 import { compose } from "./compose.mjs";
 import { checkAdapterContract } from "./lib/adapter-contract.mjs";
-import { mapChecks, runCheckCommand } from "./lib/check-runner.mjs";
+import { mapChecks, runCheckCommand, verificationEnvironment } from "./lib/check-runner.mjs";
 import { codexApprovalPolicyMatches, codexPermissionsText, piExtensionRuntimeProblems } from "./lib/runtime-validation.mjs";
 import { ENGINE, ENGINEERING_SETTING_KEYS, HOME, LOCAL_PI_SETTINGS, PI_PROFILE_CONFIG_SKILL, REPO, SHARED_PI_SETTINGS, engineeringPiSettings, isInsideRepo, isSymlink, managedLinks, pins, projectionSource, readJson, staleManagedLinks } from "./lib/repo.mjs";
 
@@ -39,7 +39,7 @@ const canon = (p) => {
   }
 };
 
-const have = (cmd) => spawnSync("sh", ["-c", `command -v ${cmd}`], { encoding: "utf8" }).status === 0;
+const have = (cmd) => spawnSync("sh", ["-c", `command -v ${cmd}`], { env: verificationEnvironment(), encoding: "utf8" }).status === 0;
 
 async function checkPi() {
   if (!have("pi")) return { name: "pi discovery", status: "skip", detail: "pi not installed" };
@@ -240,7 +240,7 @@ async function checkControlPlaneCanary() {
 }
 
 function checkComposition() {
-  const r = spawnSync(process.execPath, [join(ENGINE, "scripts/compose.mjs")], { env: { ...process.env, HARNESS_CATALOG: REPO }, encoding: "utf8", timeout: 30_000 });
+  const r = spawnSync(process.execPath, [join(ENGINE, "scripts/compose.mjs")], { env: verificationEnvironment({ HARNESS_CATALOG: REPO }), encoding: "utf8", timeout: 30_000 });
   const detail = `${instructionEntryCount(join(REPO, "instructions"))} instruction entries, ${filesCount(join(REPO, "profiles"), ".json", "profile.schema.json")} profiles`;
   return {
     name: "composition",
@@ -477,7 +477,7 @@ function checkHygiene() {
     if (existsSync(join(ENGINE, path))) problems.push(`Engine contains personal Catalog content: ${path}`);
   }
   for (const root of new Set([ENGINE, REPO])) {
-    const r = spawnSync("git", ["-C", root, "ls-files", "-s"], { encoding: "utf8" });
+    const r = spawnSync("git", ["-C", root, "ls-files", "-s"], { env: verificationEnvironment(), encoding: "utf8" });
     if (r.status !== 0) { problems.push(`source is not a Git checkout: ${root}`); continue; }
     for (const line of (r.stdout ?? "").split("\n")) {
       if (!line.trim()) continue;
@@ -505,9 +505,9 @@ function checkHygiene() {
  */
 function observedVersions() {
   const versions = [];
-  if (have("pi")) versions.push(`pi ${spawnSync("pi", ["--version"], { encoding: "utf8" }).stdout.trim()}`);
+  if (have("pi")) versions.push(`pi ${spawnSync("pi", ["--version"], { env: verificationEnvironment(), encoding: "utf8" }).stdout.trim()}`);
   if (have("codex")) {
-    const raw = spawnSync("codex", ["--version"], { encoding: "utf8" }).stdout.trim();
+    const raw = spawnSync("codex", ["--version"], { env: verificationEnvironment(), encoding: "utf8" }).stdout.trim();
     versions.push(raw.startsWith("codex-cli") ? raw : `codex ${raw}`);
   }
   return versions.length ? [`${versions.join(", ")} (observed live, not pinned)`] : [];

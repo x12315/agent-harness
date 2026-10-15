@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { extname, join, resolve } from "node:path";
 import { isProfileName, parsePiPackageList, readCatalog } from "./lib/web-catalog.mjs";
 import { ENGINE, REPO, assertCatalog } from "./lib/repo.mjs";
+import { verificationEnvironment } from "./lib/check-runner.mjs";
 
 const MIME_TYPES = {
 	".css": "text/css; charset=utf-8",
@@ -82,8 +83,7 @@ export function parsePiResourceProbe(result = {}) {
 }
 
 function piResourceMetadata() {
-	const env = { ...process.env, PI_OFFLINE: "1" };
-	delete env.PI_CODING_AGENT_DIR;
+	const env = verificationEnvironment();
 	const result = spawnSync("pi", [
 		"--offline", "--extension", join(ENGINE, "scripts/probes/pi-web-models.ts"),
 		"--no-context-files", "--no-skills", "--no-session", "--mode", "rpc",
@@ -142,7 +142,7 @@ function webRoot(repo) {
 
 function serveStatic(pathname, response) {
 	const route = pathname === "/" ? "/index.html" : pathname;
-	if (!/^\/(?:index\.html|styles\.css|app\.js|resource-plans\.js)$/.test(route)) return false;
+	if (!/^\/(?:index\.html|styles\.css|app\.js|resource-plans\.js|skill-selection\.js)$/.test(route)) return false;
 	const root = webRoot(ENGINE);
 	const file = resolve(root, `.${route}`);
 	if (!file.startsWith(`${resolve(root)}/`) || !existsSync(file) || !statSync(file).isFile()) return false;
@@ -173,6 +173,7 @@ function runCatalogWorker(message) {
  * Explicit models/modelOutput disable native Pi discovery; piResources can inject an isolated directory.
  * Discovery is cached per server; piResources uses readCatalog's public resource input contract.
  * syncHome is a trusted caller-only native-state directory override for isolated tests, never an HTTP input.
+ * Engine updates check only the server-selected Engine's origin/main; HTTP cannot choose an update source.
  * No model turns are sent. All mutations run in workers sharing the Catalog transaction lock.
  */
 export async function startHarnessWeb(options = {}) {
@@ -244,12 +245,30 @@ export async function startHarnessWeb(options = {}) {
 					json(response, 200, { ok: true, repo, startedAt, ...readCatalog(repo, { modelOutput: cachedModelOutput, models: cachedModels, scopeModels, engine, piResources: cachedPiResources }) });
 					return;
 				}
+				if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/startup-profile") {
+					const body = request.method === "POST" ? await requestJson(request) : {};
+					const result = await invokeWorker({ action: "startup-profile", options: {
+						catalog: repo, home: options.syncHome, operation: request.method === "GET" ? "status" : "configure",
+						profile: body.profile, expectedHash: body.expectedHash,
+					} });
+					json(response, result.status, result);
+					return;
+				}
+				if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/engine-updates") {
+					const body = request.method === "POST" ? await requestJson(request) : {};
+					const result = await invokeWorker({ action: "engine-updates", options: {
+						catalog: repo, home: options.syncHome, operation: request.method === "GET" ? "status" : body.operation,
+						automaticCheck: body.automaticCheck, expectedHash: body.expectedHash, force: body.force === true, automatic: body.automatic === true,
+					} });
+					json(response, result.status, result);
+					return;
+				}
 				if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/catalog-sync") {
 					const body = request.method === "POST" ? await requestJson(request) : { operation: "status" };
 					const result = await invokeWorker({ action: "catalog-sync", options: {
 						repo, home: options.syncHome, operation: request.method === "GET" ? "status" : body.operation,
 						remote: body.remote, branch: body.branch, automaticCheck: body.automaticCheck,
-						expectedHash: body.expectedHash, expectedHead: body.expectedHead, expectedCommit: body.expectedCommit, force: body.force === true,
+						expectedHash: body.expectedHash, expectedHead: body.expectedHead, expectedCommit: body.expectedCommit, force: body.force === true, automatic: body.automatic === true,
 					} });
 					json(response, result.status, result);
 					return;

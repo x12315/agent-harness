@@ -1,12 +1,21 @@
 import { execFile } from "node:child_process";
 
+/** Build an offline verification environment using native resources, not the calling Pi Profile.
+ * Copies the parent environment without changing it; explicit overrides cannot restore nesting.
+ */
+export function verificationEnvironment(overrides = {}) {
+  const env = { ...process.env, ...overrides, PI_OFFLINE: "1" };
+  delete env.PI_CODING_AGENT_DIR;
+  return env;
+}
+
 /** Run an offline check without blocking other independent checks.
  * Nonzero exits, spawn errors, timeouts and output overflow retain a failing status.
  */
 export function runCheckCommand(command, args, options = {}) {
-  const { input, ...execOptions } = options;
+  const { input, env, ...execOptions } = options;
   return new Promise((resolve) => {
-    const child = execFile(command, args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, ...execOptions }, (error, stdout, stderr) => {
+    const child = execFile(command, args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, ...execOptions, env: verificationEnvironment(env) }, (error, stdout, stderr) => {
       resolve({ status: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout, stderr, error });
     });
     child.stdin?.on("error", () => {});

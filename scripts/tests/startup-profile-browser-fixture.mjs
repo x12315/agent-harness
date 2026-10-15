@@ -1,0 +1,12 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startHarnessWeb } from "../web.mjs";
+import { createWebFixture, MODEL_OUTPUT } from "./web-fixture.mjs";
+const root = createWebFixture(), home = mkdtempSync(join(tmpdir(), "harness-startup-browser-home-"));
+const instance = await startHarnessWeb({ repo: root, engine: root, syncHome: home, modelOutput: MODEL_OUTPUT, piResources: {} });
+writeFileSync(process.argv[2], JSON.stringify({ root, home, url: instance.url, pid: process.pid }), { mode: 0o600 });
+console.log("Startup preference browser fixture ready");
+for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => { instance.server.close(); instance.server.closeAllConnections(); });
+await instance.closed;
+for (const path of [root, home]) rmSync(path, { recursive: true, force: true });

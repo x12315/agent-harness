@@ -1,4 +1,5 @@
-import { closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, rmSync, writeFileSync } from "node:fs";
+export { atomicWrite } from "../../../scripts/lib/atomic-write.mjs";
 
 /** Node resolves this projected .mjs entry to the repository before following shared save-policy imports. */
 export { planCatalogValidation } from "../../../scripts/lib/catalog-validation.mjs";
@@ -69,20 +70,4 @@ export function acquireCatalogLock(source) {
 export function releaseCatalogLock(lock) {
 	try { closeSync(lock.fd); }
 	finally { rmSync(lock.path, { force: true }); }
-}
-
-export function atomicWrite(path, content, tag = process.pid, expected) {
-	const temporary = `${path}.tmp-${tag}`;
-	try {
-		writeFileSync(temporary, content);
-		if (expected !== undefined && readFileSync(path, "utf8") !== expected) {
-			const conflict = new Error(`catalog source changed before atomic replacement: ${path}`);
-			conflict.code = "ECHANGED";
-			throw conflict;
-		}
-		renameSync(temporary, path);
-	} catch (error) {
-		rmSync(temporary, { force: true });
-		throw error;
-	}
 }

@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { createResourcePlan, repositoryUrl, resourceOwnership } from "../../web/resource-plans.js";
+import { createResourcePlan, repositoryUrl, repositoryReviewLinks, resourceOwnership } from "../../web/resource-plans.js";
 import { readCatalog } from "../lib/web-catalog.mjs";
 import { createWebFixture } from "./web-fixture.mjs";
 
@@ -20,6 +20,33 @@ const catalog = {
 	],
 	profiles: [{ name: "work", sourceHash: "source-cas", value: { label: "Work", skills: ["sh*"], adapters: { pi: { extensions: ["same-package", "local", "bookmark"] } } } }],
 };
+
+test("Review links use the actual registered repository and full commits, with no guessed hosting layouts", () => {
+	const head = "a".repeat(40), commit = "b".repeat(40);
+	const links = repositoryReviewLinks("https://github.com/owner/repo.git", { branch: "feature/review", head, commit });
+	assert.deepEqual(links, { repository: "https://github.com/owner/repo", branch: "https://github.com/owner/repo/tree/feature%2Freview", commit: `https://github.com/owner/repo/commit/${commit}`, compare: `https://github.com/owner/repo/compare/${head}...${commit}`, releases: "https://github.com/owner/repo/releases" });
+	for (const source of ["/local/git", "git@github.com:owner/repo.git", "javascript:alert(1)", "https://user:secret@github.com/owner/repo", "https://github.com/owner/repo?token=secret", "https://github.com/owner/repo#secret"]) {
+		assert.deepEqual(repositoryReviewLinks(source, { head, commit }), { repository: null, branch: null, commit: null, compare: null, releases: null });
+	}
+	for (const source of ["https://git.example.test/owner/repo.git", "https://github.com.evil.test/owner/repo", "https://github.com:8443/owner/repo", "https://github.com/owner/repo/subdir"]) {
+		const value = repositoryReviewLinks(source, { branch: "main", head, commit });
+		assert.equal(value.compare, null); assert.equal(value.commit, null); assert.equal(value.branch, null); assert.equal(value.releases, null);
+	}
+	assert.equal(repositoryReviewLinks("https://github.com/owner/repo", { head, commit: head }).compare, null);
+	assert.equal(repositoryReviewLinks("https://github.com/owner/repo", { head: "local-only", commit: "short" }).compare, null);
+	assert.equal(repositoryReviewLinks("https://github.com/owner/repo", { branch: "main?token=secret" }).branch, null);
+});
+
+test("Link renderer emits real protected anchors, never placeholders or credential-bearing hrefs", () => {
+	const source = readFileSync(new URL("../../web/app.js", import.meta.url), "utf8");
+	const context = { repositoryReviewLinks, escapeHtml: value => String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;") };
+	runInNewContext(source.slice(source.indexOf("function renderRepositoryLinks("), source.indexOf("function renderEngineUpdates(")), context);
+	const html = context.renderRepositoryLinks("https://github.com/owner/repo.git", { branch: "main", head: "a".repeat(40), commit: "b".repeat(40) }, "打开应用仓库", true);
+	assert.match(html, /href="https:\/\/github.com\/owner\/repo\/releases"/); assert.match(html, /查看更新差异/);
+	assert.match(html, /target="_blank" rel="noopener noreferrer"/); assert.doesNotMatch(html, /href="#"/);
+	assert.doesNotMatch(context.renderRepositoryLinks("https://user:secret@github.com/owner/repo", {}, "source"), /secret|href=/);
+	assert.doesNotMatch(context.renderRepositoryLinks("/local/git", {}, "source"), /href=/);
+});
 
 test("Installation handoff is unexecuted, exact-data, permission-safe and never mutates sources", () => {
 	const original = structuredClone(catalog);

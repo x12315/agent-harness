@@ -833,6 +833,18 @@ export default function harnessManager(pi: ExtensionAPI) {
 		else if (await notifyRun(["restore", "--apply"], ctx)) await notifyRun(["doctor"], ctx);
 	}
 
+	async function configureStartupProfile(requested: string | undefined, ctx: ExtensionCommandContext) {
+		const result = await runHarness(["profile", "default", "--json"], ctx, 30_000);
+		if (result.code !== 0) { ctx.ui.notify(compactOutput(result.stdout, result.stderr), "error"); return; }
+		const preference = JSON.parse(result.stdout);
+		const choice = requested ?? await selectDetailed(ctx, `默认启动方案（仅下次启动）· ${preference.profile ?? "普通模式"}`, [
+			{ value: "none", label: "普通模式", description: "不预选工作方案，不恢复上次选择" },
+			...profileNames().map(profileChoice),
+		]);
+		if (!choice) return;
+		await notifyRun(["profile", "default", choice, `--expected-hash=${preference.preferencesHash}`], ctx, 30_000);
+	}
+
 	const actions: Array<SelectItem & {
 		profileArgument?: boolean;
 		run: (args: string[], ctx: ExtensionCommandContext) => void | Promise<void | boolean>;
@@ -842,9 +854,11 @@ export default function harnessManager(pi: ExtensionAPI) {
 		{ value: "skills", label: "Skills 目录", description: "搜索摘要并查看完整说明，不改变 Profile", run: (_args, ctx) => browseSkills(ctx) },
 		{ value: "configure", label: "配置工作方案（基础）", description: "词条、Skills、推荐模型；保存不切换会话", profileArgument: true, run: (args, ctx) => configureProfile(args[0], ctx) },
 		{ value: "web", label: "打开 Web 配置工作台", description: "完整编辑、工具与扩展、方案新建/复制/删除", run: (_args, ctx) => launchWeb(ctx) },
+		{ value: "default", label: "设置默认启动方案", description: "只影响下次 pi-h / harness pi；none 为普通模式，不切换当前会话", profileArgument: true, run: (args, ctx) => configureStartupProfile(args[0], ctx) },
 		{ value: "switch", label: "切换当前工作方案", description: "在当前会话生效；发起切换后退出管理面", profileArgument: true, run: (args, ctx) => switchProfile(args[0], ctx) },
 		{ value: "apply", label: "应用 Catalog", description: "重新生成 adapter、修复受管投影并运行验收", run: (args, ctx) => mutate("apply", args, ctx) },
 		{ value: "doctor", label: "完整检查", description: "只读检查生成物、依赖、密钥、运行时与投影", run: async (_args, ctx) => { await notifyRun(["doctor"], ctx); } },
+		{ value: "updates", label: "检查应用新版本", description: "检查 Engine origin/main；不更新源码、不安装或重启", run: async (_args, ctx) => { await notifyRun(["updates", "--check"], ctx, 65_000); } },
 		{ value: "restore", label: "恢复依赖", description: "委托固定版本的官方工具恢复缺失依赖", run: (args, ctx) => mutate("restore", args, ctx) },
 		{ value: "profiles", label: "工作方案列表", description: "查看 Catalog 中已保存的工作方案", run: async (_args, ctx) => { await notifyRun(["profile", "list"], ctx, 30_000); } },
 		{ value: "edit", label: "高级 JSON 编辑", description: "直接编辑工作方案源码；保存不切换会话", profileArgument: true, run: (args, ctx) => editProfile(args[0], ctx) },
@@ -895,7 +909,7 @@ export default function harnessManager(pi: ExtensionAPI) {
 		getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
 			const [name = "", value = ""] = prefix.split(/\s+/, 2);
 			if (actions.find(action => action.value === name)?.profileArgument) {
-				const items = profileNames().filter(profile => profile.startsWith(value)).map(profile => ({ value: `${name} ${profile}`, label: profile }));
+				const items = [...(name === "default" ? ["none"] : []), ...profileNames()].filter(profile => profile.startsWith(value)).map(profile => ({ value: `${name} ${profile}`, label: profile }));
 				return items.length ? items : null;
 			}
 			const items = actions.filter(action => action.value.startsWith(name)).map(action => ({ value: action.value, label: `${action.value} · ${action.label}` }));
