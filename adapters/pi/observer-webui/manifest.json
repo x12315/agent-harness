@@ -1,0 +1,21 @@
+{
+  "id": "pi-observer",
+  "name": "Pi Observer",
+  "version": "0.1.0",
+  "description": "Read-only live status for Pi sessions and child processes from Pi Observer snapshots.",
+  "apiVersion": 2,
+  "view": true,
+  "permissions": ["fs:read", "ui"],
+  "ui": {
+    "topbar.primary": [
+      {
+        "id": "observer-tab",
+        "label": "Pi Observer",
+        "labelEn": "Pi Observer",
+        "kind": "view",
+        "view": "plugin:pi-observer"
+      }
+    ]
+  },
+  "iconSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"m12 8 2.5 4.5L12 16l-2.5-3.5L12 8Z\"/></svg>"
+}

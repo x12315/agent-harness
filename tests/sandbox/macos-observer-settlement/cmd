@@ -1,0 +1,1 @@
+cd /tmp/ahsb-push && node --test scripts/tests/pi-observer.test.mjs scripts/tests/iterm-bell.test.mjs adapters/pi/observer-webui/*.test.mjs adapters/pi/observer-webui/client/*.test.mjs && node scripts/tests/observer-settlement-guest.mjs darwin
