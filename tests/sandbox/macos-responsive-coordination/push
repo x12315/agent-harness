@@ -1,0 +1,8 @@
+scripts/tests/coordinator-webui-guest.mjs:/tmp/ahsb-push/scripts/tests/coordinator-webui-guest.mjs
+adapters/pi/coordinator-webui/index.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/index.mjs
+adapters/pi/coordinator-webui/coordinator.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/coordinator.mjs
+adapters/pi/coordinator-webui/webui-executor.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/webui-executor.mjs
+adapters/pi/coordinator-webui/coverage.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/coverage.mjs
+adapters/pi/coordinator-webui/manifest.json:/tmp/ahsb-push/adapters/pi/coordinator-webui/manifest.json
+adapters/pi/coordinator-webui/client/entry.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/client/entry.mjs
+adapters/pi/coordinator-webui/client/outbox.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/client/outbox.mjs

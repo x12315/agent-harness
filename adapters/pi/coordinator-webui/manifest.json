@@ -1,0 +1,19 @@
+{
+  "id": "pi-coordinator",
+  "name": "Pi Coordinator",
+  "version": "0.1.0",
+  "description": "Durable natural-language intake with native Web UI background goal execution and independent review. Experimental, opt-in.",
+  "apiVersion": 2,
+  "engines": {"pi-web-ui": ">=0.100.0"},
+  "view": true,
+  "permissions": ["ui", "chat", "llm"],
+  "settings": [
+    {"key": "allowExecution", "type": "boolean", "label": "允许此独立协调入口执行工作区任务（实验版）", "default": false},
+    {"key": "endpoint", "type": "text", "label": "本机 Web UI WebSocket", "default": "ws://127.0.0.1:8787/ws"}
+  ],
+  "ui": {
+    "topbar.primary": [
+      {"id": "coordinator-tab", "label": "任务协调", "labelEn": "Coordinator", "kind": "view", "view": "plugin:pi-coordinator"}
+    ]
+  }
+}
