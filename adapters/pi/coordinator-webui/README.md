@@ -1,63 +1,63 @@
-# Pi responsive coordination experiment
+# Pi task coordination workspace
 
-An opt-in **Pi Web UI plugin**, not another agent runtime. It keeps a free-form inbox while the installed Web UI GoalService runs its existing executor/reviewer loop. The normal chat, native subagent tools, goal UI, Observer and session-window extension are not replaced.
+A directly openable, persistent coordination workspace built on **Pi 1.1.0 / pi-web-ui 0.100.0**. Reuses native executor conversations and GoalService review, not a second agent runtime. Existing ordinary chat, subagent, Observer and session-window installations are not replaced.
 
-## Current boundary
+## Open the experience
 
-This is a first practice, not a production rollout or a promise to discover every unknown gap. Execution is **off by default**. This entry creates independent native conversations using the server's normal workspace capabilities; it does not yet prove inheritance of an arbitrary parent conversation's narrower Profile/tool ceiling. Use an isolated, trusted test workspace until that boundary is integrated and validated.
-
-Requirements: Pi 1.1.0, Pi Web UI 0.100.0, Node 22.19+ with WebSocket, one Web UI server per data directory, and a writable plugin directory. Pi's package cohort must be version-aligned, not merely its top-level CLI version. The sandbox recipe pins those transitive packages.
-
-The v1 UI lives in a separate **任务协调 / Coordinator** tab. It does not intercept the ordinary chat composer or native terminal input. It accepts text, not realtime audio. “Realtime” here means incoming requests and questions are independent of long worker runs, not zero model latency.
-
-## Use in a private test instance
-
-Review the plugin first. Use the existing Web UI CLI to install the local Engine source into a separate test data directory:
+On a prepared installation:
 
 ```sh
-pi-web-ui install /path/to/engine/adapters/pi/coordinator-webui \
-  --name pi-coordinator --data-dir /path/to/private-test-data
+node scripts/pi-coordinator.mjs
+node scripts/pi-coordinator.mjs shortcut
 ```
 
-Do not use `--force` over an existing plugin. Start the server with the same data directory, an explicit trusted `--cwd`, and `--no-browser` if running headless. The default loopback endpoint is `ws://127.0.0.1:8787/ws`; set the plugin's endpoint to the actual local server port before enabling execution. Existing `PI_WEB_TOKEN`, when configured, stays in process memory and is not written to task handles or logs.
+The first command starts/reuses an independent loopback server and opens its actual workspace page; the second creates a local `任务协调.command` Desktop launcher without installing a system service. The page is `/plugins-api/pi-coordinator/experience`, not a nonfunctional deep-link into the ordinary chat. No manual plugin configuration or queue syntax is required.
 
-In plugin settings, explicitly enable the experimental execution entry only for the intended workspace. Send natural language in the Coordinator tab. Examples:
-
-- “调查这个超时，保留现有接口，给出复现和回归证据。”
-- “现在确认了什么？”
-- “刚才的任务先暂停。”
-- “继续，但先检查控制链路。”
-
-The system stores the exact input before acknowledging it. It interprets the target from retained task context; ambiguous references ask a focused question. The browser retains unacknowledged text and stable request IDs in session storage, so reload/retry does not silently lose or duplicate the request. Do not close the browser tab before receipt if session storage is unavailable.
-
-Native goals use a finite three-round review budget. The v1 coordinator permits one active workspace task at a time to avoid simultaneous unisolated writers; questions and durable intake remain independent. Multiple concurrent read-only or worktree-isolated writers are not yet configured through this UI.
-
-## Ownership and recovery
-
-- Coordinator: original messages, interpretations, revisions, queue, desired pause/cancel state and wall-clock checkpoints.
-- Native Web UI: persistent reviewer/executor conversations, tools, review loop and worker state.
-- Observer: its existing progress/attention presentation. Observer attention is never used as proof of task completion.
-
-Runtime state is private `state/<workspace-hash>/coordination-state.json` under the installed plugin. It is not source, a Git artifact or a replacement for the native session store. Reload fences the retiring writer before the next plugin instance takes ownership. Workspace changes stop dispatch; each canonical workspace has separate retained state.
-
-Unknown start or stop outcomes reserve the task for reconciliation instead of launching it again. A stop is confirmed only when the exact known native executor session disappears after the control request and the owning goal is cleared/idle. This does not roll back files, deployments, messages or independently detached commands. Early cancellation before an executor identity exists can remain unconfirmed.
-
-Pause/resume starts a new bounded native goal round after confirmed cessation, not an operating-system process checkpoint. A process/server restart can retain tasks and sessions but is not a guarantee of automatic continuation; uncertain work remains visible for reconciliation. Closing the whole Web UI server removes its timer. No launchd/systemd service is installed by this experiment.
-
-## Completion limitation
-
-The installed native reviewer currently concentrates on items claimed complete in the current round. Its `pass` is therefore provisional: this plugin additionally performs a no-tool **whole-objective coverage check** over the original request, amendments and native evidence. Missing items must quote an existing requirement; up to two bounded repair revisions are automatically dispatched without another user reminder. Unknown evidence or exhausted repair budget pauses rather than reporting completion. Questions remain independent while this review runs.
-
-This is an evidence-coverage model check, not a second tool-based functional review or a mathematical proof that every unknown gap was found. It can make judgment errors. Its scope is deliberately original requirements, not unsolicited scope expansion; native functional validation is still necessary.
-
-Other remaining work: inherited tool-ceiling enforcement, semantic dependency/resource-aware task decomposition, bounded speculative preparation, calibrated duration ranges, actual-model intent evaluation, background continuity with a closed server, native TUI input adaptation, and wider end-to-end controls/reload testing.
-
-## Tests
+Default port: 8793. Default private runtime directory: `~/.local/share/harness/coordinator`. An initial dependency-free Node example workspace is created without overwriting existing files. The native model defaults to the user's existing selection; `--model provider/model` is an explicit standalone override.
 
 ```sh
-node --test adapters/pi/coordinator-webui/*.test.mjs
-/path/to/agent-harness-sandbox/bin/test.sh \
-  --project /path/to/engine macos-responsive-coordination
+node scripts/pi-coordinator.mjs status
+node scripts/pi-coordinator.mjs stop
+node scripts/pi-coordinator.mjs restart --workspace /path/to/trusted/project
 ```
 
-The consumer case requires a separately prepared Pi 1.1.0/Web UI 0.100.0 macOS base and uses a bounded guest-local model fixture, not real credentials. It checks actual native execution/review wiring and plugin receipt/classification; it does **not** measure real-model judgment quality. Inspect `COORDINATOR_WEBUI_RECEIPT`, runtime evidence and source hashes. Host unit tests are not VM behavior evidence.
+Closing the browser does not stop background work. Stop/restart retains the inbox and native sessions; uncertain in-flight work is reconciled rather than blindly replayed. Paused work can be continued in normal language. Shutdown does not secretly leave all future intake globally paused.
+
+## Use naturally
+
+Describe a goal and constraints. While a command runs, ask what is happening, add another task, amend the original requirement, or pause/resume/cancel only the affected work. Task buttons submit the same natural-language requests through the durable inbox; they are not a parallel control database.
+
+The page shows conversation, exact original requests, amendments, native progress, elapsed/checkpoint times, coverage evidence and retained native review records. Browser outbox requests keep stable IDs across reload/reconnect, and are acknowledged only after private durable storage. Ambiguous references ask a question rather than requiring a human-maintained ID queue.
+
+Native functional pass is provisional until whole-objective coverage is checked. Genuinely missing original requirements trigger at most two bounded repair revisions. Repair reuses completed evidence and does not blindly repeat already completed long commands. Failure/uncertainty stays visible instead of becoming success.
+
+## Reuse decisions
+
+- Native Pi Web UI: model authentication, agent tools, executor/reviewer lifecycle, plugin message transport, settings, native topbar and composer entry slots.
+- Marked **18.0.11**, MIT: mature Markdown grammar for model replies. esbuild **0.28.2** compiles the already installed, version-checked dependency into private plugin artifacts; no vendored third-party source or second React runtime. Raw HTML, executable links and automatic remote images are not enabled. Code blocks have explicit copy actions.
+- Native HTML form/button/details and a small domain-specific view: durable receipt states, original-goal evidence and targeted controls, which generic chat components do not own.
+- assistant-ui and AG-UI/CopilotKit were evaluated, not adopted by name alone. Detailed tradeoffs and primary sources: `docs/decisions/responsive-coordination-ui.md`.
+
+The official Web UI local-plugin installer/build path is reused. Updates compare the existing source fingerprint and preserve an installation snapshot; unknown existing plugin content is not overwritten. Runtime coordination state is outside plugin source under `<data-dir>/coordinator-state/<workspace-hash>/`.
+
+## Authentication and authority
+
+Independent agent settings, session root, data directory and port preserve daily Profiles/settings/conversations and the daily server. Native authentication/model configuration is referenced locally, never embedded in source, handed to a guest, or placed in command arguments. Normal native OAuth refresh can update its native auth store; this is not a new login, password or credential export. If an existing `PI_WEB_TOKEN` is supplied, its native protection is preserved: launcher authentication does not authenticate a fresh browser. The launcher reports that browser authentication is still required and does not open an unauthorized page or put that token in a URL/shortcut/process argument. Complete the existing native browser authentication first. Do not edit shared provider configuration in the independent native workbench unless that is intended.
+
+This is a **standalone trusted-workspace entry**, not a child that claims to inherit any arbitrary parent TUI Profile's narrower tool allowlist. Its native workspace permission rules are not an OS sandbox. The launcher explicitly enables execution only in this independent instance; an ordinary manual plugin installation remains off by default. One workspace writer runs at a time; conversation/intake stay independent. No sudo, new passwords, launchd/systemd service or automatic main merge.
+
+A confirmed pause stops the exact known native executor session; real acceptance also checked owned long-tool PIDs exited. Pause/resume starts a new bounded native round, not an OS-process checkpoint. Cancellation does not undo earlier file/network effects or prove arbitrary detached processes have been rolled back.
+
+## Validation
+
+```sh
+node --test adapters/pi/coordinator-webui/*.test.mjs adapters/pi/coordinator-webui/client/*.test.mjs
+/path/to/agent-harness-sandbox/bin/test.sh --project /path/to/engine macos-responsive-coordination
+/path/to/agent-harness-sandbox/bin/test.sh --project /path/to/engine macos-coordinator-browser
+```
+
+Native protocol and real Chromium desktop/mobile cases run entirely in guests using bounded local model responses and source-hash/PNG integrity checks. They do not claim model-quality validation.
+
+Separate real-model operational acceptance used the independent delivered instance: actual long commands during questions, exact files and regression results, targeted pause/resume/revision/cancellation, and a two-phase goal where premature native pass was caught and phase two completed automatically without a user reminder. Private transcripts/authentication remain outside Git. See `docs/tasks/2026-10-20-responsive-coordination.md` for failures, fixes and evidence scope.
+
+Broader work remains beyond this first usable experience: arbitrary parent tool-ceiling inheritance, isolated multiwriter dependency/resource scheduling, calibrated duration estimates, bounded anticipation, native TUI input integration and closed-server automatic continuation. Coverage checks can err; no claim of finding every unknown gap.

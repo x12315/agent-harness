@@ -13,6 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Coordinator } from "../../adapters/pi/coordinator-webui/coordinator.mjs";
 import { WebUiExecutor } from "../../adapters/pi/coordinator-webui/webui-executor.mjs";
 import { localStorage } from "../../adapters/pi/coordinator-webui/index.mjs";
+import { buildClient } from "../../adapters/pi/coordinator-webui/build-client.mjs";
 
 const runtime = process.env.AHSB_RUNTIME_DIR;
 assert.ok(runtime, "AHSB_RUNTIME_DIR is required: never run the tested service on the host");
@@ -25,7 +26,7 @@ const piDir = join(modules, "@earendil-works/pi-coding-agent");
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 const webPackage = await json(join(webDir, "package.json"));
 const piPackage = await json(join(piDir, "package.json"));
-const sourcePaths = ["scripts/tests/coordinator-webui-guest.mjs", ...["index.mjs", "coordinator.mjs", "webui-executor.mjs", "coverage.mjs", "manifest.json", "client/entry.mjs", "client/outbox.mjs"].map((name) => `adapters/pi/coordinator-webui/${name}`)];
+const sourcePaths = ["scripts/tests/coordinator-webui-guest.mjs", ...["index.mjs", "coordinator.mjs", "webui-executor.mjs", "coverage.mjs", "model-json.mjs", "native-evidence.mjs", "native-session.mjs", "build-client.mjs", "client/markdown.mjs", "manifest.json", "experience.html", "client/entry.mjs", "client/outbox.mjs", "client/view-utils.mjs", "client/styles.css", "client/experience.mjs", "client/experience.css"].map((name) => `adapters/pi/coordinator-webui/${name}`)];
 const sources = Object.fromEntries(await Promise.all(sourcePaths.map(async (path) => [path, createHash("sha256").update(await readFile(join(project, path))).digest("hex")])));
 const root = await mkdtemp(join(tmpdir(), "coordinator-webui-"));
 const home = join(root, "home"), agent = join(home, ".pi/agent"), cwd = join(root, "workspace");
@@ -145,7 +146,7 @@ async function main() {
 				const label = prompt.includes("FIXTURE_GOAL_A") ? "A" : prompt.includes("FIXTURE_GOAL_B") ? "B" : prompt.includes("FIXTURE_GOAL_C") ? "C" : prompt.includes("FIXTURE_GOAL_D") ? "D" : prompt.includes("FIXTURE_GOAL_E") ? "E" : null;
 				assert.ok(label, `unexpected native model request: ${prompt.slice(0, 2500)}`);
 				res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
-				if (prompt.includes("[goal-review]")) {
+				if (/^(?:你是严格、独立的验收者|You are a strict, independent acceptor)/.test(prompt)) {
 					receipt.mock.reviewCalls++;
 					const round = (reviews.get(label) ?? 0) + 1; reviews.set(label, round);
 					respond(res, JSON.stringify({ verdict: label === "A" && round === 1 ? "fail" : "pass", feedback: `fixture-${label}-review-${round}` }));
@@ -182,6 +183,7 @@ net.Socket.prototype.connect=function(...args){const first=Array.isArray(args[0]
 	const pluginDir = join(root, "data/plugins/pi-coordinator");
 	await mkdir(join(pluginDir, "client"), { recursive: true });
 	for (const path of sourcePaths.filter((path) => path.startsWith("adapters/"))) await writeFile(join(pluginDir, path.replace("adapters/pi/coordinator-webui/", "")), await readFile(join(project, path)), { mode: 0o600 });
+	await buildClient({webPackage:webDir,pluginDirectory:pluginDir});
 	await mkdir(join(root, "data/plugin-overrides"), { recursive: true });
 	await writeFile(join(root, "data/plugin-overrides/pi-coordinator.json"), JSON.stringify({ settings: { endpoint: `ws://127.0.0.1:${port}/ws`, allowExecution: true } }));
 	const env = { PATH: `${join(runtime, "bin")}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: home, TMPDIR: root, LANG: "en_US.UTF-8", TERM: "xterm-256color", PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_WEB_PLUGIN_CATALOG_URL: "off", PI_WEB_HOST: "127.0.0.1", PI_WEB_PORT: String(port), PI_WEB_CWD: cwd, PI_WEB_DATA_DIR: join(root, "data"), PI_WEB_SDK_DIR: piDir, PI_WEB_SDK: "global", NO_PROXY: "127.0.0.1,localhost", NODE_OPTIONS: `--import=${guard}`, FIXTURE_NETWORK_LOG: join(root, "network.jsonl") };

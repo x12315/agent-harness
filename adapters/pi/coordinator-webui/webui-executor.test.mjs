@@ -85,7 +85,9 @@ test("real message order, isolated clients, persisted conversation, finite nativ
 		assert.ok(!JSON.stringify(handle).includes("private-token"));
 		assert.ok(!JSON.stringify(executor).includes("private-token"));
 		assert.ok(!("url" in handle));
-		assert.deepEqual(await executor.status(args(handle)), { revision: 2, status: "running" });
+		const status = await executor.status(args(handle));
+		assert.equal(status.revision, 2); assert.equal(status.status, "running");
+		assert.equal(status.progress.phase, "executing");
 		assert.deepEqual(await executor.start(task), handle);
 		const other = await executor.start({ ...task, id: "task-2" });
 		assert.notEqual(other.clientId, handle.clientId);

@@ -53,6 +53,37 @@ const send = (coordinator, action, text = action, targetId) => coordinator.submi
 const tasks = (coordinator) => coordinator.snapshot().tasks;
 const passed = (revision) => ({ revision, status: "passed", nativeReview: "passed" });
 
+test("completed goals can be amended without replacing original text or retaining old completion time", async (t) => {
+ const f=fixture();t.after(()=>f.coordinator.dispose());
+ await send(f.coordinator,'task','original scope');await until(()=>tasks(f.coordinator)[0]?.status==='running');
+ const id=tasks(f.coordinator)[0].id;await f.coordinator.observe(id,passed(1));
+ assert.equal(tasks(f.coordinator)[0].status,'verified');assert.ok(Number.isFinite(tasks(f.coordinator)[0].finishedAt));
+ await send(f.coordinator,'revise','additional constraint',id);await until(()=>f.starts.length===2);
+ assert.equal(tasks(f.coordinator)[0].objective,'original scope');assert.equal(tasks(f.coordinator)[0].revision,2);assert.equal(tasks(f.coordinator)[0].finishedAt,undefined);
+});
+
+test("conversation receives actual completion output only after required coverage passes", async (t) => {
+ const f=fixture({config:{requireCoverage:true}});t.after(()=>f.coordinator.dispose());await send(f.coordinator,'task','two phases');await until(()=>tasks(f.coordinator)[0]?.status==='running');
+ const id=tasks(f.coordinator)[0].id;await f.coordinator.observe(id,{...passed(1),nativeEvidence:{executorReport:'Only phase one done'},coverage:{status:'missing',missing:[{requirement:'two phases',evidenceGap:'phase two missing'}]}});
+ assert.equal(f.coordinator.snapshot().inputs[0].answer,undefined);await until(()=>f.starts.length===2);
+ await f.coordinator.observe(id,{...passed(2),nativeEvidence:{executorReport:'Both files written and read'},coverage:{status:'passed',checked:[{requirement:'two phases',evidence:'two actual files'}]}});
+ assert.match(f.coordinator.snapshot().inputs[0].answer,/Both files written and read/);assert.equal(tasks(f.coordinator)[0].status,'verified');
+});
+
+test("normal shutdown retains paused work but does not silently pause all future intake after restart", async (t) => {
+ const f=fixture();await send(f.coordinator,'task','existing work');await until(()=>tasks(f.coordinator)[0]?.status==='running');await f.coordinator.stop();
+ assert.equal(f.disk().paused,true);assert.equal(f.disk().dispatchPausedBeforeShutdown,false);
+ const restored=fixture({saved:f.disk(),config:{maxConcurrent:1}});t.after(()=>restored.coordinator.dispose());await restored.coordinator.restore();
+ assert.equal(restored.coordinator.snapshot().paused,false);assert.equal(tasks(restored.coordinator)[0].status,'paused');
+ await send(restored.coordinator,'task','new explicit request');await until(()=>restored.starts.length===1);assert.equal(restored.starts[0].objective,'new explicit request');
+});
+
+test("targeted resume after pause-all leaves unrelated tasks paused", async (t) => {
+ const f=fixture();t.after(()=>f.coordinator.dispose());await send(f.coordinator,'task','first');await send(f.coordinator,'task','second');await until(()=>f.starts.length===2);
+ await send(f.coordinator,'pause');await until(()=>tasks(f.coordinator).every(task=>task.status==='paused'));
+ await send(f.coordinator,'resume','continue first',tasks(f.coordinator)[0].id);await until(()=>tasks(f.coordinator)[0].status==='running');assert.equal(tasks(f.coordinator)[1].status,'paused');
+});
+
 test("receipt follows durable raw input and precedes classification", async (t) => {
 	const gate = deferred();
 	let classified = false;

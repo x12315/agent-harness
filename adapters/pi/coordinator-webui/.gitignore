@@ -1,0 +1,4 @@
+# Compiled third-party installation artifacts and private runtime state are not source.
+/client/vendor/
+/state/
+/node_modules/

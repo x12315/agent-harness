@@ -21,7 +21,7 @@ test("classifier passes bounded factual state without task handles or executable
 	let request;
 	const classify = intentClassifier({ llm: { complete: async (value) => { request = value; return { ok: true, text: JSON.stringify({ action: "question", text: "进度", answer: "尚未完成" }) }; } } });
 	const result = await classify({ text: "到哪里了" }, { inputs: [], tasks: [{ id: "task-1", objective: "work", status: "running", revision: 1, amendments: [], handle: { token: "not-input" } }] });
-	assert.equal(result.action, "question"); assert.equal(request.timeoutMs, 30000);
+	assert.equal(result.action, "question"); assert.equal(request.timeoutMs, 90000);
 	assert.equal(request.prompt.includes("not-input"), false); assert.ok(request.system.includes("NOT permission"));
 });
 

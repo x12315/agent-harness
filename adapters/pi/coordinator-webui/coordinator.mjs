@@ -49,6 +49,7 @@ export class Coordinator {
 			if (saved.schemaVersion !== 1 || !Array.isArray(saved.inputs) || !Array.isArray(saved.tasks) || !Number.isSafeInteger(saved.nextId)) throw new Error("Unsupported coordinator snapshot");
 			this._state = copy(saved);
 			await this._change((state) => {
+				if (typeof state.dispatchPausedBeforeShutdown === "boolean") { state.paused = state.dispatchPausedBeforeShutdown; delete state.dispatchPausedBeforeShutdown; }
 				for (const task of state.tasks) {
 					if (OCCUPIED.has(task.status)) {
 						task.status = "needs_reconciliation";
@@ -103,6 +104,7 @@ export class Coordinator {
 			const task = state.tasks.find((item) => item.id === id);
 			if (!task || task.runRevision !== event.revision || TERMINAL.has(task.status)) return;
 			if (event.controlId != null && task.control?.id !== event.controlId) return;
+			if (event.progress) task.progress = copy(event.progress);
 			if (task.revision === event.revision && event.status === "passed" && event.nativeReview === "passed") {
 				task.nativeCompletion = { revision: event.revision, nativeReview: "passed", ...(event.nativeEvidence ? { nativeEvidence: copy(event.nativeEvidence) } : {}) };
 				if (task.desired === "cancel") { task.status = "cancelled"; task.handle = null; task.gap = "Native work completed before cancellation; side effects are not rolled back"; return; }
@@ -125,13 +127,17 @@ export class Coordinator {
 				}
 				task.coverage = copy(event.coverage || null);
 				task.status = "verified";
+				task.progress = { summary: "执行、原生审查和原始需求覆盖检查已完成" };
 				task.handle = null;
 				task.gap = null;
+				const input = state.inputs.find((item) => item.id === task.inputId);
+				if (input) input.answer = `本项工作已完成，${this.requireCoverage ? "原生审查与需求覆盖检查已通过。" : "原生审查已通过。"}${event.nativeEvidence?.executorReport ? `\n\n${event.nativeEvidence.executorReport}` : event.nativeEvidence?.feedback ? `\n\n检查反馈：${event.nativeEvidence.feedback}` : ""}`;
 				return;
 			}
 			if (["queued", "paused"].includes(task.status)) return;
 			const ended = event.stopped === true || ["passed", "failed", "cancelled", "stopped", "paused"].includes(event.status);
 			if (ended) {
+				if (event.stopped === true && /stop|cessation|connection|snapshot|matching native|reconciliation/i.test(task.gap || "")) task.gap = null;
 				const control = task.control?.revision === event.revision ? task.control : null;
 				task.stopEvidence = { revision: event.revision, operationId: control?.id ?? null, operation: control?.operation ?? event.status };
 				const resumable = task.revision === event.revision && (control?.operation === "pause" || event.status === "paused") && !["passed", "failed", "cancelled"].includes(event.status);
@@ -188,7 +194,7 @@ export class Coordinator {
 		this._closed = true;
 		if (!this._stopPromise) this._stopPromise = (async () => {
 			await this.restore();
-			try { await this._change((state) => this._pauseAll(state)); }
+			try { await this._change((state) => { state.dispatchPausedBeforeShutdown = state.paused; this._pauseAll(state); }); }
 			finally {
 				this._closed = true;
 				this.clock.clearTimeout(this._timer);
@@ -235,6 +241,11 @@ export class Coordinator {
 			if (this._fault) throw this._fault;
 			const next = copy(this._state);
 			const result = update(next);
+			for (const task of next.tasks) {
+				const previous = this._state.tasks.find((item) => item.id === task.id);
+				if (TERMINAL.has(task.status) && !TERMINAL.has(previous?.status)) task.finishedAt = this.clock.now();
+				else if (!TERMINAL.has(task.status) && TERMINAL.has(previous?.status)) delete task.finishedAt;
+			}
 			if (isDeepStrictEqual(next, this._state)) return result;
 			try { await this.storage.write(copy(next)); }
 			catch (error) { this._fault = error; throw error; }
@@ -321,20 +332,25 @@ export class Coordinator {
 		}
 		const candidates = state.tasks.filter((task) => !TERMINAL.has(task.status));
 		const task = result.targetId ? state.tasks.find((item) => item.id === result.targetId) : candidates.length === 1 ? candidates[0] : null;
-		if (!task || TERMINAL.has(task.status)) {
+		if (!task || (TERMINAL.has(task.status) && result.action !== "revise")) {
 			input.status = "clarify";
-			input.answer = "Specify one non-terminal task ID";
+			input.answer = "你指的是哪项工作？说出任务内容即可，不需要填写编号。";
 			return;
 		}
 		input.taskId = task.id;
 		if (result.action === "revise") {
+			if (TERMINAL.has(task.status)) {
+				task.desired = state.paused ? "pause" : "run"; task.status = state.paused ? "paused" : "queued";
+				task.handle = null; task.stopEvidence = null; task.coverage = null; task.coverageRepairs = 0; task.coverageAttempt = 0;
+				delete task.startedAt; delete task.deadlineAt; delete task.nextCheckAt;
+			}
 			task.revision++;
 			task.amendments.push({ revision: task.revision, text: result.text, inputId });
 			if (task.stopEvidence?.revision === task.runRevision || task.nativeCompletion?.revision === task.runRevision) task.handle = null;
 			if (task.nativeCompletion?.revision === task.runRevision) task.status = task.desired === "run" ? "queued" : "paused";
 			else if (task.handle != null) task.status = "stopping";
 			else if (task.status !== "starting" && task.status !== "needs_reconciliation") task.status = task.desired === "run" ? "queued" : "paused";
-		} else if (result.action === "resume") this._resume(task);
+		} else if (result.action === "resume") { state.paused = false; this._resume(task); }
 		else {
 			task.desired = result.action;
 			if (task.nativeCompletion?.revision === task.revision) { task.handle = null; task.status = result.action === "cancel" ? "cancelled" : "paused"; }
@@ -431,12 +447,13 @@ export class Coordinator {
 			const event = await this.executor.resume({ id: task.id, handle: copy(task.handle), revision: task.runRevision, stopEvidence: copy(task.stopEvidence) });
 			if (event?.running !== true && event?.status !== "running") throw new Error("Native resume not confirmed");
 			handle = task.handle;
-		} else handle = await this.executor.start({ id: task.id, objective: task.objective, sourceText: task.sourceText, revision: task.runRevision, amendments: copy(task.amendments) });
+		} else handle = await this.executor.start({ id: task.id, objective: task.objective, sourceText: task.sourceText, revision: task.runRevision, amendments: copy(task.amendments), ...(task.amendments.at(-1)?.source === "coverage-review" && task.nativeCompletion ? { repairContext: { nativeReview: task.nativeCompletion.nativeReview, evidence: copy(task.nativeCompletion.nativeEvidence) } } : {}) });
 		if (handle == null) throw new Error("Native start returned no handle");
 		await this._change((state) => {
 			const current = state.tasks.find((item) => item.id === task.id);
 			if (current.runRevision !== task.runRevision || !["starting", "stopping", "needs_reconciliation", "running"].includes(current.status)) return;
 			current.handle = copy(handle);
+			current.nativeReference = copy(handle);
 			if (!current.coverage) current.gap = null;
 			current.stopEvidence = null;
 			current.status = current.desired === "run" && !state.paused && current.revision === task.runRevision ? "running" : "stopping";
