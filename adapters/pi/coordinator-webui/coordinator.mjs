@@ -67,6 +67,31 @@ export class Coordinator {
 	/** Return an isolated snapshot; mutating it cannot change durable state. */
 	snapshot() { return copy(this._state); }
 
+	/**
+	 * Apply one targeted control without invoking the model classifier.
+	 * Uses the same state transitions as a classified pause/resume/cancel, and
+	 * resolves only after the new state is durably written. Unknown tasks,
+	 * terminal tasks, stale revisions and non-task actions are rejected with a
+	 * stable message so callers can record a deterministic receipt.
+	 */
+	async applyControl({ action, taskId, expectedRevision } = {}) {
+		await this.restore();
+		if (this._closed) throw new Error("coordinator-stopped");
+		if (!["pause", "resume", "cancel"].includes(action)) throw new Error("unsupported-action");
+		if (typeof taskId !== "string" || !taskId) throw new Error("unknown-task");
+		if (!Number.isSafeInteger(expectedRevision)) throw new Error("revision-mismatch");
+		const result = await this._change((state) => {
+			const task = state.tasks.find((item) => item.id === taskId);
+			if (!task) throw new Error("unknown-task");
+			if (TERMINAL.has(task.status)) throw new Error("terminal-task");
+			if (task.revision !== expectedRevision) throw new Error("revision-mismatch");
+			this._applyControl(state, task, action);
+			return { applied: true, status: task.status, revision: task.revision };
+		});
+		this._kick();
+		return result;
+	}
+
 	/** Persist the exact raw text before returning its receipt; never waits for classification. */
 	async submit(text, { requestId } = {}) {
 		await this.restore();
@@ -286,8 +311,12 @@ export class Coordinator {
 				if (!input) break;
 				let result;
 				try {
-					result = await this.classify(copy(input), this.snapshot());
-					if (!result || Array.isArray(result) || !ACTIONS.has(result.action) || typeof result.text !== "string" || Object.keys(result).some((key) => !["action", "text", "targetId", "answer"].includes(key)) || (result.targetId != null && typeof result.targetId !== "string") || (result.answer != null && typeof result.answer !== "string")) throw new Error("Invalid classification contract");
+					const verdict = await this.classify(copy(input), this.snapshot());
+					// Routing only: unknown keys are dropped, never stored or executed.
+					result = verdict && typeof verdict === "object" && !Array.isArray(verdict)
+						? { action: verdict.action, text: verdict.text, ...(verdict.targetId != null ? { targetId: verdict.targetId } : {}), ...(verdict.answer != null ? { answer: verdict.answer } : {}) }
+						: null;
+					if (!result || !ACTIONS.has(result.action) || typeof result.text !== "string" || (result.targetId != null && typeof result.targetId !== "string") || (result.answer != null && typeof result.answer !== "string")) throw new Error("Invalid classification contract");
 				} catch (error) {
 					result = { action: "clarify", text: `Classification unavailable: ${error.message}` };
 				}
@@ -350,13 +379,16 @@ export class Coordinator {
 			if (task.nativeCompletion?.revision === task.runRevision) task.status = task.desired === "run" ? "queued" : "paused";
 			else if (task.handle != null) task.status = "stopping";
 			else if (task.status !== "starting" && task.status !== "needs_reconciliation") task.status = task.desired === "run" ? "queued" : "paused";
-		} else if (result.action === "resume") { state.paused = false; this._resume(task); }
-		else {
-			task.desired = result.action;
-			if (task.nativeCompletion?.revision === task.revision) { task.handle = null; task.status = result.action === "cancel" ? "cancelled" : "paused"; }
-			else if (task.handle != null) task.status = "stopping";
-			else if (!["starting", "needs_reconciliation"].includes(task.status)) task.status = result.action === "cancel" ? "cancelled" : "paused";
-		}
+		} else this._applyControl(state, task, result.action);
+	}
+
+	/** Shared pause/resume/cancel transition for classifier routes and direct controls. */
+	_applyControl(state, task, action) {
+		if (action === "resume") { state.paused = false; this._resume(task); return; }
+		task.desired = action;
+		if (task.nativeCompletion?.revision === task.revision) { task.handle = null; task.status = action === "cancel" ? "cancelled" : "paused"; }
+		else if (task.handle != null) task.status = "stopping";
+		else if (!["starting", "needs_reconciliation"].includes(task.status)) task.status = action === "cancel" ? "cancelled" : "paused";
 	}
 
 	_resume(task) {

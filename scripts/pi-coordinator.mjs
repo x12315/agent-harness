@@ -60,6 +60,7 @@ if(await status()) {
 }
 await mkdir(root,{recursive:true,mode:0o700});
 for(const folder of [agent,data,sessions])await mkdir(folder,{recursive:true,mode:0o700});
+const observerRoot = join(root,"observer");
 const ownWorkspace = workspace===join(root,"workspace") || (args.includes("--example") && workspace.startsWith(root+"/"));
 if(ownWorkspace) {
  await mkdir(workspace,{recursive:true,mode:0o700});
@@ -90,26 +91,38 @@ for(const name of ["auth.json","models.json"]) {
 }
 await writeFile(join(agent,"settings.json"),JSON.stringify({...privateDefaults,defaultProvider:model.split('/')[0],defaultModel:model.slice(model.indexOf('/')+1),defaultThinkingLevel:privateDefaults.defaultThinkingLevel??"low",packages:privateDefaults.packages??[],skills:privateDefaults.skills??[],noExtensions:privateDefaults.noExtensions??true}),{mode:0o600});
 await mkdir(join(data,"plugin-overrides"),{recursive:true,mode:0o700});
-await writeFile(join(data,"plugin-overrides/pi-coordinator.json"),JSON.stringify({settings:{allowExecution:true,endpoint:`ws://127.0.0.1:${port}/ws`,model}}),{mode:0o600});
+await writeFile(join(data,"plugin-overrides/pi-coordinator.json"),JSON.stringify({settings:{allowExecution:true,allowObserverControl:true,endpoint:`ws://127.0.0.1:${port}/ws`,model}}),{mode:0o600});
+await writeFile(join(data,"plugin-overrides/pi-observer.json"),JSON.stringify({settings:{allowControl:true}}),{mode:0o600});
+await mkdir(observerRoot,{recursive:true,mode:0o700});
 await new Promise((accept,reject)=>{const probe=createServer();probe.once("error",()=>reject(Error("Selected port is occupied; daily servers will not be stopped")));probe.listen(port,"127.0.0.1",()=>probe.close(accept));});
 const cli=join(packageRoot,"bin/pi-web-ui.mjs");
 const run=(arguments_)=>new Promise((accept,reject)=>{const child=spawn(process.execPath,[cli,...arguments_],{env:{...process.env,PI_WEB_UI_PACKAGE:packageRoot},stdio:["ignore","ignore","pipe"]});let error="";child.stderr.on("data",chunk=>{error+=chunk;});child.once("exit",code=>code===0?accept():reject(Error("Native plugin install failed; inspect runtime installation")));child.once("error",reject);});
-const pluginDir=join(data,"plugins/pi-coordinator"), pluginSource=join(source,"adapters/pi/coordinator-webui");
 const hashes=async(directory)=>{const files=await readdir(directory,{recursive:true,withFileTypes:true});const entries=[];for(const file of files){if(!file.isFile())continue;const absolute=join(file.parentPath,file.name),relative=absolute.slice(directory.length+1);if(relative.startsWith('state/')||relative.startsWith('client/vendor/')||relative.split('/').includes('node_modules'))continue;entries.push([relative,createHash('sha256').update(await readFile(absolute)).digest('hex')]);}return Object.fromEntries(entries.sort(([a],[b])=>a.localeCompare(b)));};
-const desired=await hashes(pluginSource),pinFile=join(root,"installed-source.json"),pin=await json(pinFile);
-let retainedStorage;
-let exists=true;try{await stat(pluginDir);}catch(error){if(error.code!=="ENOENT")throw error;exists=false;}
-if(exists) {
- if(pin?.source!==pluginSource)throw Error("Existing plugin is not owned by this launcher; choose another state directory");
- for(const [file,hash] of Object.entries(pin.files)){let actual;try{actual=createHash('sha256').update(await readFile(join(pluginDir,file))).digest('hex');}catch{throw Error('Installed plugin changed; preserve and inspect it before updating');}if(actual!==hash)throw Error('Installed plugin changed; preserve and inspect it before updating');}
- if(JSON.stringify(desired)!==JSON.stringify(pin.files)){
-  try{retainedStorage=await readFile(join(pluginDir,'storage.json'));}catch(error){if(error.code!=='ENOENT')throw error;}
-  const backup=join(root,`plugin-backup-${Date.now()}`);await rename(pluginDir,backup);exists=false;
+/** Install or update one owned plugin without overwriting unknown content or its saved settings. */
+async function ensurePlugin({name,sourceDirectory,build}) {
+ const directory=join(data,"plugins",name),pinPath=join(root,`installed-${name}.json`);
+ const desired=await hashes(sourceDirectory);
+ const pin=await json(pinPath) ?? (name==="pi-coordinator"?await json(join(root,"installed-source.json")):null);
+ let retainedStorage,exists=true;
+ try{await stat(directory);}catch(error){if(error.code!=="ENOENT")throw error;exists=false;}
+ if(exists) {
+  if(pin?.source!==sourceDirectory)throw Error(`Existing ${name} is not owned by this launcher; choose another state directory`);
+  for(const [file,hash] of Object.entries(pin.files)){let actual;try{actual=createHash('sha256').update(await readFile(join(directory,file))).digest('hex');}catch{throw Error(`Installed ${name} changed; preserve and inspect it before updating`);}if(actual!==hash)throw Error(`Installed ${name} changed; preserve and inspect it before updating`);}
+  if(JSON.stringify(desired)!==JSON.stringify(pin.files)){
+   try{retainedStorage=await readFile(join(directory,'storage.json'));}catch(error){if(error.code!=='ENOENT')throw error;}
+   await rename(directory,join(root,`plugin-backup-${name}-${Date.now()}`));exists=false;
+  }
+ }
+ if(!exists){
+  await run(["install",sourceDirectory,"--name",name,"--data-dir",data,...(build?["--build"]:[])]);
+  if(retainedStorage)await writeFile(join(directory,"storage.json"),retainedStorage,{flag:"wx",mode:0o600});
+  await writeFile(pinPath,JSON.stringify({source:sourceDirectory,files:desired}),{mode:0o600});
  }
 }
-if(!exists){await run(["install",pluginSource,"--name","pi-coordinator","--data-dir",data,"--build"]);if(retainedStorage)await writeFile(join(pluginDir,'storage.json'),retainedStorage,{flag:'wx',mode:0o600});await writeFile(pinFile,JSON.stringify({source:pluginSource,files:desired}),{mode:0o600});}
+await ensurePlugin({name:"pi-coordinator",sourceDirectory:join(source,"adapters/pi/coordinator-webui"),build:true});
+await ensurePlugin({name:"pi-observer",sourceDirectory:join(source,"adapters/pi/observer-webui"),build:false});
 const log=await open(join(root,"server.log"),"a",0o600);
-const env={...process.env,PI_CODING_AGENT_DIR:agent,PI_CODING_AGENT_SESSION_DIR:sessions,PI_WEB_PLUGIN_CATALOG_URL:"off",PI_WEB_SDK:"global",PI_WEB_SDK_DIR:sdkDir,PI_COORDINATOR_MODEL:model,LANG:"zh_CN.UTF-8"};
+const env={...process.env,PI_CODING_AGENT_DIR:agent,PI_CODING_AGENT_SESSION_DIR:sessions,PI_WEB_PLUGIN_CATALOG_URL:"off",PI_WEB_SDK:"global",PI_WEB_SDK_DIR:sdkDir,PI_COORDINATOR_MODEL:model,PI_OBSERVER_DIR:observerRoot,LANG:"zh_CN.UTF-8"};
 const child=spawn(process.execPath,[cli,"--no-browser","--host","127.0.0.1","--port",String(port),"--cwd",workspace,"--agent-dir",agent,"--data-dir",data],{env,stdio:["ignore",log.fd,log.fd],detached:true});
 await log.close();child.unref();
 await writeFile(stateFile,JSON.stringify({pid:child.pid,source,port,workspace,model,authRequired:Boolean(env.PI_WEB_TOKEN),startedAt:new Date().toISOString()},null,2),{mode:0o600});
@@ -121,7 +134,7 @@ try{
   const endpoint=new URL(`ws://127.0.0.1:${port}/ws`);if(env.PI_WEB_TOKEN)endpoint.searchParams.set('token',env.PI_WEB_TOKEN);
   socket=new WebSocket(endpoint.href);
   socket.addEventListener("open",()=>socket.send(JSON.stringify({type:"hello",clientId:crypto.randomUUID(),locale:"zh"})));
-  socket.addEventListener("message",({data})=>{let message;try{message=JSON.parse(String(data));}catch{return;}if(message.type==="plugins"&&message.plugins?.some(plugin=>plugin.id==="pi-coordinator"&&plugin.active)){clearTimeout(timer);accept();}});
+  socket.addEventListener("message",({data})=>{let message;try{message=JSON.parse(String(data));}catch{return;}if(message.type==="plugins"&&["pi-coordinator","pi-observer"].every(id=>message.plugins?.some(plugin=>plugin.id===id&&plugin.active))){clearTimeout(timer);accept();}});
   socket.addEventListener("error",()=>{clearTimeout(timer);reject(Error("Startup connection failed"));});
  });
  socket.close();const response=await fetch(url,{signal:AbortSignal.timeout(3000),...(env.PI_WEB_TOKEN?{headers:{Authorization:`Bearer ${env.PI_WEB_TOKEN}`}}:{})});if(!response.ok)throw Error("User-facing page is unavailable");

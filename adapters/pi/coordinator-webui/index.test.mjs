@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, before, after } from "node:test";
 import { mkdtemp, readFile, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plugin, { localStorage, intentClassifier } from "./index.mjs";
 import { Outbox } from "./client/outbox.mjs";
+
+let observerDir, previousObserverDir;
+before(async () => {
+	observerDir = await mkdtemp(join(tmpdir(), "coordinator-observer-"));
+	previousObserverDir = process.env.PI_OBSERVER_DIR;
+	process.env.PI_OBSERVER_DIR = observerDir;
+});
+after(async () => {
+	if (previousObserverDir === undefined) delete process.env.PI_OBSERVER_DIR;
+	else process.env.PI_OBSERVER_DIR = previousObserverDir;
+	await rm(observerDir, { recursive: true, force: true });
+});
 
 test("state is private, atomically replaced and reloadable", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "coordinator-store-"));

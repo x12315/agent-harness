@@ -262,8 +262,10 @@ test("untrusted classifier cannot add executable configuration", async (t) => {
 	const f = fixture({ classify: async () => ({ action: "task", text: "work", cwd: "/", shell: "something", authorized: true }) });
 	t.after(() => f.coordinator.dispose());
 	await f.coordinator.submit("work");
-	await until(() => f.coordinator.snapshot().inputs[0].status === "clarify");
-	assert.equal(f.starts.length, 0);
+	await until(() => f.starts.length === 1);
+	const stored = f.disk().tasks[0];
+	assert.equal(stored.objective, "work");
+	assert.deepEqual(Object.keys(stored).filter((key) => ["cwd", "shell", "authorized"].includes(key)), []);
 });
 
 test("stop and dispose are idempotent and never manufacture success", async () => {
@@ -625,4 +627,67 @@ test("uncertain start retains its safe native handle for later reconciliation", 
  await send(f.coordinator,'task','work');
  await until(()=>tasks(f.coordinator)[0]?.status==='needs_reconciliation');
  assert.equal(tasks(f.coordinator)[0].handle.conversationId,'native');
+});
+
+test("direct control rejects stale revisions without changing durable state", async (t) => {
+ const f=fixture();t.after(()=>f.coordinator.dispose());
+ await send(f.coordinator,'task','stale control');await until(()=>tasks(f.coordinator)[0]?.status==='running');
+ const task=tasks(f.coordinator)[0];
+ await assert.rejects(f.coordinator.applyControl({action:'pause',taskId:task.id,expectedRevision:task.revision+1}),/revision-mismatch/);
+ await assert.rejects(f.coordinator.applyControl({action:'pause',taskId:task.id,expectedRevision:undefined}),/revision-mismatch/);
+ assert.equal(tasks(f.coordinator)[0].status,'running');assert.equal(f.disk().tasks[0].desired,'run');
+});
+
+test("direct control rejects terminal tasks and unknown tasks", async (t) => {
+ const f=fixture();t.after(()=>f.coordinator.dispose());
+ await send(f.coordinator,'task','terminal control');await until(()=>tasks(f.coordinator)[0]?.status==='running');
+ const task=tasks(f.coordinator)[0];await f.coordinator.observe(task.id,passed(task.revision));
+ await assert.rejects(f.coordinator.applyControl({action:'pause',taskId:task.id,expectedRevision:task.revision}),/terminal-task/);
+ await assert.rejects(f.coordinator.applyControl({action:'pause',taskId:'task-missing',expectedRevision:1}),/unknown-task/);
+ assert.equal(tasks(f.coordinator)[0].status,'verified');
+});
+
+test("direct control rejects actions that are not pause/resume/cancel", async (t) => {
+ const f=fixture();t.after(()=>f.coordinator.dispose());
+ await send(f.coordinator,'task','unsupported control');await until(()=>tasks(f.coordinator)[0]?.status==='running');
+ const task=tasks(f.coordinator)[0];
+ for (const action of ['ack','revise','pause-all','']) await assert.rejects(f.coordinator.applyControl({action,taskId:task.id,expectedRevision:task.revision}),/unsupported-action/);
+ assert.equal(tasks(f.coordinator)[0].status,'running');
+});
+
+test("direct pause resolves only after the state change is durably written", async (t) => {
+ let saved=null,blockWrites=false,release;
+ const gate=new Promise((done)=>{release=done;});
+ // Use a dedicated coordinator so this test can hold the write open.
+ const coordinator=new Coordinator({
+  storage:{read:async()=>saved,write:async(state)=>{if(blockWrites)await gate;saved=structuredClone(state);}},
+  classify:async(input)=>JSON.parse(input.text),
+  executor:{start:async(task)=>`handle-${task.id}`,pause:async()=>({stopped:true}),resume:async()=>({running:true}),cancel:async()=>({stopped:true}),revise:async()=>({stopped:true})},
+  checkpointMs:10_000,
+ });
+ t.after(()=>coordinator.dispose());
+ await coordinator.submit(JSON.stringify({action:'task',text:'durable pause'}));
+ await until(()=>coordinator.snapshot().tasks[0]?.status==='running');
+ const task=coordinator.snapshot().tasks[0];blockWrites=true;
+ let settled=false;
+ const applied=coordinator.applyControl({action:'pause',taskId:task.id,expectedRevision:task.revision}).then((result)=>{settled=true;return result;});
+ await new Promise((done)=>setTimeout(done,10));
+ assert.equal(settled,false);
+ assert.equal(coordinator.snapshot().tasks[0].status,'running');
+ release();
+ const result=await applied;
+ assert.deepEqual(result,{applied:true,status:'stopping',revision:1});
+ assert.equal(saved.tasks[0].desired,'pause');assert.equal(saved.tasks[0].status,'stopping');
+});
+
+test("direct control never invokes the routing classifier", async (t) => {
+ let classifications=0;
+ const f=fixture({classify:async(input)=>{classifications++;return JSON.parse(input.text);}});
+ t.after(()=>f.coordinator.dispose());
+ await send(f.coordinator,'task','classifier stays idle');await until(()=>tasks(f.coordinator)[0]?.status==='running');
+ assert.equal(classifications,1);
+ const task=tasks(f.coordinator)[0];
+ await f.coordinator.applyControl({action:'pause',taskId:task.id,expectedRevision:task.revision});
+ await until(()=>tasks(f.coordinator)[0].status==='paused');
+ assert.equal(classifications,1);
 });

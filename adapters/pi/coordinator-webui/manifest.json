@@ -10,6 +10,7 @@
   "permissions": ["ui", "chat", "llm", "http"],
   "settings": [
     {"key": "allowExecution", "type": "boolean", "label": "允许此独立协调入口执行工作区任务（实验版）", "default": false},
+    {"key": "allowObserverControl", "type": "boolean", "label": "允许 Observer 通过分层链路暂停/继续/取消任务（实验版）", "default": false},
     {"key": "endpoint", "type": "text", "label": "本机 Web UI WebSocket", "default": ""},
     {"key": "model", "type": "select", "label": "协调与执行模型", "optionsFrom": "models", "default": ""}
   ],

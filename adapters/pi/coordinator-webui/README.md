@@ -31,6 +31,18 @@ The page shows conversation, exact original requests, amendments, native progres
 
 Native functional pass is provisional until whole-objective coverage is checked. Genuinely missing original requirements trigger at most two bounded repair revisions. Repair reuses completed evidence and does not blindly repeat already completed long commands. Failure/uncertainty stays visible instead of becoming success.
 
+## Observer link
+
+The coordinator publishes a reference-only task fact (`owner`,
+`taskId`, `revision`, objective, status, progress) into the shared Observer root,
+and drains queued control requests from it. `allowObserverControl` is off by
+default; the launcher enables it for this standalone instance. A control is
+`applied` only after the coordinator reaches the settled state, and stays
+`unknown` when the native stop is still unconfirmed. The Observer tab shows
+task frames beside Pi sessions and offers pause/resume/cancel; the coordinator
+remains the only owner of task identity and acceptance. See
+`docs/decisions/observer-layering.md`.
+
 ## Reuse decisions
 
 - Native Pi Web UI: model authentication, agent tools, executor/reviewer lifecycle, plugin message transport, settings, native topbar and composer entry slots.
