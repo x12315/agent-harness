@@ -1,0 +1,23 @@
+{
+  "id": "pi-coordinator",
+  "name": "Pi Coordinator",
+  "version": "0.2.0",
+  "description": "Durable natural-language intake with native Web UI background goal execution and independent review. Experimental, opt-in.",
+  "apiVersion": 2,
+  "engines": {"pi-web-ui": ">=0.100.0"},
+  "view": true,
+  "build": {"command": "node build-client.mjs", "outputs": ["client/vendor/marked.mjs"]},
+  "permissions": ["ui", "chat", "llm", "http"],
+  "settings": [
+    {"key": "allowExecution", "type": "boolean", "label": "允许此独立协调入口执行工作区任务（实验版）", "default": false},
+    {"key": "allowObserverControl", "type": "boolean", "label": "允许 Observer 通过分层链路暂停/继续/取消任务（实验版）", "default": false},
+    {"key": "endpoint", "type": "text", "label": "本机 Web UI WebSocket", "default": ""},
+    {"key": "model", "type": "select", "label": "协调与执行模型", "optionsFrom": "models", "default": ""}
+  ],
+  "ui": {
+    "composer.actions": [{"id":"coordinator-compose-entry","label":"任务协调","labelEn":"Coordinator","kind":"view","view":"plugin:pi-coordinator"}],
+    "topbar.primary": [
+      {"id": "coordinator-tab", "label": "任务协调", "labelEn": "Coordinator", "kind": "view", "view": "plugin:pi-coordinator"}
+    ]
+  }
+}

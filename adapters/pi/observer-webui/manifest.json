@@ -1,11 +1,14 @@
 {
   "id": "pi-observer",
   "name": "Pi Observer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Read-only live status for Pi sessions and child processes from Pi Observer snapshots.",
   "apiVersion": 2,
   "view": true,
-  "permissions": ["fs:read", "ui"],
+  "permissions": ["fs:read", "ui", "http"],
+  "settings": [
+    {"key": "allowControl", "type": "boolean", "label": "允许本机 Observer API 排队控制请求（由 pi-coordinator 执行）", "default": false}
+  ],
   "ui": {
     "topbar.primary": [
       {

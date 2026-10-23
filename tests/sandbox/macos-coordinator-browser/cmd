@@ -1,0 +1,1 @@
+cd /tmp/ahsb-push && node scripts/tests/coordinator-browser-guest.mjs

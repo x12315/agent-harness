@@ -1,9 +1,31 @@
 # Pi Observer
 
-Read-only Pi activity snapshots and per-session one-sentence summaries. The
-extension is `../extensions/pi-observer.ts`; this directory is its standalone
-`pi-web-ui` plugin. Initial implementation was validated in
-`agent-harness-sandbox/pi-observer`; Engine now owns the installed source.
+Read-only Pi activity snapshots, owner-published task facts and per-session
+one-sentence summaries. The extension is `../extensions/pi-observer.ts`; this
+directory is its standalone `pi-web-ui` plugin. Initial implementation was
+validated in `agent-harness-sandbox/pi-observer`; Engine now owns the installed
+source.
+
+## Layers and consumers
+
+The plugin is an observation interface, not an executor. Facts flow up from the
+session extension and from owner adapters; two consumers read the same interface:
+
+- **Human branch** — the existing Observer tab, cards, pending list and bell
+  behaviour. It gains a merged "运行与任务" section and, only when a control
+  owner is configured, pause/resume/cancel buttons. Buttons queue a request and
+  show 排队中 / 已生效 / 被拒绝 from the owner's receipt; they never optimistically
+  claim the action worked.
+- **Programmatic branch** — the loopback HTTP interface below, for the
+  coordinator or another managing agent. It reads frames/events and may queue a
+  control request. It cannot write task facts, read arbitrary files, change a
+  model, or declare a goal complete.
+
+Authority stays outside Observer. Coordinator task facts are reference-only
+copies under `<controlRoot>/tasks`; Observer displays them, marks stale facts
+and derives discrepancies for a human or agent, and never resolves a conflict by
+itself. An unsupported subject (a Pi session with no registered control owner)
+advertises no action instead of faking one.
 
 Enable `pi-observer` and the installed `pi-web-ui` package in Catalog Profile
 extension selections, then compose and bootstrap through `harness`. Create
@@ -39,6 +61,39 @@ be revoked in WebUI settings. No user-directory grant is preinstalled by deploym
 A plugin update may require browser refresh or renewed authorization when the
 host's grant no longer applies. The viewer refreshes every 15 seconds and never
 calls a model or registers agent tools.
+
+## Observer protocol additions
+
+The `observer-state` message keeps its original fields and semantics. It also
+carries the additive `observer.view/1` fields: `viewSchema`, `frames`, `tasks`,
+`capability`, `discrepancies` and `controlRoot`. Session frames come from the
+same fresh snapshots and matching session summaries the tab already shows;
+task frames come from owner-published facts under `<controlRoot>/tasks`. Observer
+displays those facts and derives discrepancies, but never mints task identity or
+mutates a task fact.
+
+## Local HTTP API
+
+The plugin requires the `http` permission and exposes loopback-only routes under
+`/plugins-api/pi-observer`:
+
+| Route | Behavior |
+| --- | --- |
+| `GET /capability` | Advertised actions, sources and coverage |
+| `GET /frames` | Fresh session/task frames, discrepancies and coverage |
+| `GET /events?since=&limit=` | Bounded event journal read |
+| `POST /control` | Validate and queue one control request (8 KB JSON body) |
+| `GET /control?id=<id>` | Read one queued/completed command receipt |
+
+Non-loopback callers receive `403 {"error":"loopback-only"}`. Control is off by
+default; the `allowControl` setting must be explicitly enabled. When enabled,
+capability advertises `pause`, `resume` and `cancel` because `pi-coordinator`
+owns the queue. Observer only appends `control.requested`; it never starts a
+process or applies the action. A target with a Pi session `subjectId` but no
+task reference is rejected with `422 unsupported-action` rather than being given
+a fabricated owner. Unknown or invalid requests return stable `400` codes, and
+unreadable protocol files degrade to `503 {"error":"unavailable"}` without stack
+traces.
 
 ## Terminal commands
 
