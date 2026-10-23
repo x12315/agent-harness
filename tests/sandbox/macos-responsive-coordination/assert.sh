@@ -20,7 +20,7 @@ const hashes = new Map(manifest.trim().split('\n').map(line => {
   assert.ok(match, 'invalid source hash manifest');
   return [match[2], match[1]];
 }));
-const expectedSources = ['scripts/tests/coordinator-webui-guest.mjs', ...['index.mjs', 'coordinator.mjs', 'webui-executor.mjs', 'coverage.mjs', 'model-json.mjs', 'native-evidence.mjs', 'native-session.mjs', 'build-client.mjs', 'client/markdown.mjs', 'manifest.json', 'experience.html', 'client/entry.mjs', 'client/outbox.mjs', 'client/view-utils.mjs', 'client/styles.css', 'client/experience.mjs', 'client/experience.css'].map(name => `adapters/pi/coordinator-webui/${name}`)];
+const expectedSources = ['scripts/tests/coordinator-webui-guest.mjs', ...['index.mjs', 'coordinator.mjs', 'webui-executor.mjs', 'task-graph.mjs', 'task-context.mjs', 'observer-bridge.mjs', 'protocol.generated.mjs', 'coverage.mjs', 'model-json.mjs', 'native-evidence.mjs', 'native-session.mjs', 'build-client.mjs', 'client/markdown.mjs', 'manifest.json', 'experience.html', 'client/entry.mjs', 'client/outbox.mjs', 'client/view-utils.mjs', 'client/styles.css', 'client/experience.mjs', 'client/experience.css'].map(name => `adapters/pi/coordinator-webui/${name}`)];
 assert.deepEqual(Object.keys(receipt.sources).sort(), [...expectedSources].sort());
 for (const file of expectedSources) {
   const digest = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');

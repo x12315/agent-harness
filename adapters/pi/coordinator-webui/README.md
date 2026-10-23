@@ -25,11 +25,35 @@ Closing the browser does not stop background work. Stop/restart retains the inbo
 
 ## Use naturally
 
-Describe a goal and constraints. While a command runs, ask what is happening, add another task, amend the original requirement, or pause/resume/cancel only the affected work. Task buttons submit the same natural-language requests through the durable inbox; they are not a parallel control database.
+Describe a goal and constraints. While a command runs, ask what is happening, add another task, amend the original requirement, or pause/resume/cancel only the affected work. Task buttons submit explicit version-checked operation batches through the same durable inbox, without asking a model to reinterpret the button. They do not maintain a parallel control database.
 
 The page shows conversation, exact original requests, amendments, native progress, elapsed/checkpoint times, coverage evidence and retained native review records. Browser outbox requests keep stable IDs across reload/reconnect, and are acknowledged only after private durable storage. Ambiguous references ask a question rather than requiring a human-maintained ID queue.
 
 Native functional pass is provisional until whole-objective coverage is checked. Genuinely missing original requirements trigger at most two bounded repair revisions. Repair reuses completed evidence and does not blindly repeat already completed long commands. Failure/uncertainty stays visible instead of becoming success.
+
+## Related work, communication and atomic arrangements
+
+Use ordinary language, for example:
+
+- “原调查继续，另开初稿与终稿；终稿等初稿通过，两项分别验收。”
+- “把调查任务已有发现转交给报告任务核对，不扩大范围。”
+- “这两项其实属于同一需求；先给合并方案，等我确认。”
+- “把终稿并回初稿，保留两项全部要求、证据和历史。”
+- “调查负责根因、报告负责整理；把分工和等待关系一起调整。”
+
+The coordinator owns three distinct relations: `derivedFrom` pins provenance without imposing a wait, `partOf` retains a parent integration goal, and `dependencies` gates execution on the specified prerequisite scope passing verification. An executor without internal stage gates uses separate preparation/finalization tasks; a free-text dependency condition is a description of that task-verification gate, not an executable predicate. Controller-only evidence repair/delivery rounds can satisfy the original scope pin; a user scope change cannot silently replace it. Parent completion still requires actual whole-goal integration acceptance.
+
+A complete operation batch is validated on a clone and durably committed before dispatch. Invalid versions, references, cycles or incompatible arrangements leave **all** operations unapplied. Supported batches include task creation/fork/decomposition, scope changes, dependency addition/removal, per-task control, merge, queue reorder, mediated messages and proposals. Source workers must confirm cessation before a replacement runs. A merge retains requirements, evidence, native-record references and historical source aliases; it does not pretend an arbitrary external operation or filesystem write was transactional. An unmet internal prerequisite cannot simply disappear during a merge: such a batch is rejected until the prerequisite is verified or the user explicitly changes the dependency. Removing a wait does not waive artifact, approval or permission requirements.
+
+Communication is **coordinator-mediated**, not a new peer-to-peer agent runtime. Messages carry fixed-version source result excerpts obtained from the owner, never caller-supplied completion evidence. A missing excerpt may be attached later only from the same pinned user scope; an existing pinned excerpt is not silently rewritten. Paused recipients remain paused; a completed recipient can perform a scoped followup. Cancelled/failed goals are not silently revived. Reports may give feedback and suggest a new allocation, but injection does not mean read, agreement, authorization or acceptance. A proposal changes nothing until explicitly accepted; its entire operation set is revalidated together. Exact normalized duplicate objectives generate a notice, not an automatic semantic merge.
+
+Intake remains verbatim in the ledger. Execution receives the assigned scope, applicable constraints, actual intake/latest clarification provenance and bounded relationship evidence; compound intake does not assign every other task to the current worker. A single new goal binds its full original request rather than a model summary. Clarification preserves the original request and answered question. Task routing can semantically match older work through up to three compact historical title-index pages, alongside lexical matching over complete task text. It can request up to three read-only context pages (up to 3,500 characters each); original scope is not replaced by the clipped candidate view. A guessed-but-unobserved task must be read before an executable verdict. Oversized/ambiguous work remains visibly unresolved rather than being declared complete.
+
+All revision operation plans, including direct UI/API ingress and proposals, must explicitly select additive or replacement semantics. Explicit scope reduction/replacement also supplies the complete new acceptance array, so withdrawn criteria cannot accidentally survive as defaults; unaffected requirements and applicable constraints remain binding. Single-operation message/proposal replies use the same validated atomic envelope as batches. Model service failures preserve the request, expose a safe technical category and do not blindly launch another in-flight call.
+
+Evidence excerpts are historical references, not a universal artifact-freshness guarantee. Scope changes invalidate affected dependency proofs, while native consumers must check the current applicable files/results before reuse; this version does not add a filesystem watcher.
+
+Current bounded message contract: up to 1,800 characters and one source per message, up to 64 pending messages per recipient. Multiple messages can be committed in one atomic batch. Complete messages are fitted into the native context; only IDs actually included are acknowledged as injected, and remaining messages are processed at later execution boundaries. These are internal contracts, not a format the user must maintain. One workspace writer still runs at a time; unknown/stopping work continues to occupy its slot. Native subagents and ordinary Pi chat remain separate existing execution paths, not globally rescheduled by this plugin.
 
 ## Observer link
 
@@ -70,6 +94,6 @@ node --test adapters/pi/coordinator-webui/*.test.mjs adapters/pi/coordinator-web
 
 Native protocol and real Chromium desktop/mobile cases run entirely in guests using bounded local model responses and source-hash/PNG integrity checks. They do not claim model-quality validation.
 
-Separate real-model operational acceptance used the independent delivered instance: actual long commands during questions, exact files and regression results, targeted pause/resume/revision/cancellation, and a two-phase goal where premature native pass was caught and phase two completed automatically without a user reminder. Private transcripts/authentication remain outside Git. See `docs/tasks/2026-10-20-responsive-coordination.md` for failures, fixes and evidence scope.
+Separate real-model operational acceptance used the independent delivered instance: actual long commands during questions, exact files and regression results, targeted pause/resume/revision/cancellation, and a two-phase goal where premature native pass was caught and phase two completed automatically without a user reminder. Private transcripts/authentication remain outside Git. See `docs/tasks/2026-10-20-responsive-coordination.md` for the original delivery and `docs/tasks/2026-10-23-task-composition-acceptance.md` for B01–B24, communication/merge evidence and remaining rollout checks.
 
 Broader work remains beyond this first usable experience: arbitrary parent tool-ceiling inheritance, isolated multiwriter dependency/resource scheduling, calibrated duration estimates, bounded anticipation, native TUI input integration and closed-server automatic continuation. Coverage checks can err; no claim of finding every unknown gap.

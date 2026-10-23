@@ -33,6 +33,12 @@ function taskFact(task, workspace, now) {
 		gap: task.gap ?? null,
 		workspace,
 		progress: { summary: summary ?? null, tool: tool ?? null },
+		...(task.mergeInto ? { mergeInto: task.mergeInto } : {}),
+		...(task.mergeSources?.length ? { mergeSources: [...task.mergeSources] } : {}),
+		...(task.derivedFrom ? { derivedFrom: { taskId: task.derivedFrom.taskId, revision: task.derivedFrom.revision } } : {}),
+		...(task.partOf ? { partOf: { taskId: task.partOf.taskId, revision: task.partOf.revision } } : {}),
+		...(task.children?.length ? { children: [...task.children] } : {}),
+		...(task.dependencies?.length ? { dependencies: task.dependencies.map(({ taskId, revision, condition, satisfiedByRevision }) => ({ taskId, revision, condition, satisfiedByRevision })) } : {}),
 		attention: task.status === "paused" && Boolean(task.gap),
 	};
 	const elapsed = elapsedMs(task, now);
@@ -100,7 +106,7 @@ export function createObserverBridge(options = {}, extra = {}) {
 		if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== task.revision) { await reject(control, "revision-mismatch"); return; }
 		if (control.expectedRevision != null && control.expectedRevision !== task.revision) { await reject(control, "revision-mismatch"); return; }
 		try {
-			await coordinator.applyControl({ action: control.action, taskId, expectedRevision });
+			await coordinator.applyControl({ action: control.action, taskId, expectedRevision, issuedAt: control.issuedAt });
 			// "Applied" means the owner saw the settled effect, not merely that it
 			// accepted the request. A stop that is still waiting for native
 			// confirmation stays honest as `unknown`.
@@ -118,7 +124,7 @@ export function createObserverBridge(options = {}, extra = {}) {
 	/** Protocol receipts omit the requested action; the queued request still carries intent. */
 	async function withRequestedAction(control) {
 		const request = JSON.parse(await readFile(join(directory, "control", "pending", `${safeName(control.commandId)}.json`), "utf8"));
-		return { ...control, action: request.action, expectedRevision: request.expectedRevision ?? control.expectedRevision };
+		return { ...control, action: request.action, issuedAt: request.issuedAt, expectedRevision: request.expectedRevision ?? control.expectedRevision };
 	}
 
 	async function consumeOnce(allowControl) {

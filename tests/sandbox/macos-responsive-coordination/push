@@ -16,3 +16,7 @@ adapters/pi/coordinator-webui/client/experience.css:/tmp/ahsb-push/adapters/pi/c
 adapters/pi/coordinator-webui/manifest.json:/tmp/ahsb-push/adapters/pi/coordinator-webui/manifest.json
 adapters/pi/coordinator-webui/client/entry.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/client/entry.mjs
 adapters/pi/coordinator-webui/client/outbox.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/client/outbox.mjs
+adapters/pi/coordinator-webui/task-graph.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/task-graph.mjs
+adapters/pi/coordinator-webui/task-context.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/task-context.mjs
+adapters/pi/coordinator-webui/observer-bridge.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/observer-bridge.mjs
+adapters/pi/coordinator-webui/protocol.generated.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/protocol.generated.mjs

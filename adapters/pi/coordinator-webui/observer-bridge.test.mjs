@@ -109,7 +109,9 @@ test("a queued control is applied exactly once and leaves a done receipt", async
 		const bridge = createObserverBridge({ coordinator, workspace: "/w", root });
 		await enqueueControl(root, control("cmd-once", "pause"));
 		await bridge.consumeControls({ allowControl: true });
-		assert.deepEqual(coordinator.calls, [{ action: "pause", taskId: "task-1", expectedRevision: 1 }]);
+		assert.equal(coordinator.calls.length, 1);
+		assert.ok(Number.isFinite(Date.parse(coordinator.calls[0].issuedAt)));
+		assert.deepEqual(coordinator.calls.map(({ issuedAt, ...command }) => command), [{ action: "pause", taskId: "task-1", expectedRevision: 1 }]);
 		assert.equal((await readControl(root, "cmd-once")).state, "applied");
 		assert.deepEqual(await listControls(root), []);
 		await bridge.consumeControls({ allowControl: true });
@@ -198,7 +200,9 @@ test("ack and other non-task actions are rejected, and corrupt requests are skip
 		await writeFile(join(root, "control", "pending", "corrupt.json"), "{not json");
 		await enqueueControl(root, control("cmd-pause", "pause"));
 		await bridge.consumeControls({ allowControl: true });
-		assert.deepEqual(coordinator.calls, [{ action: "pause", taskId: "task-1", expectedRevision: 1 }]);
+		assert.equal(coordinator.calls.length, 1);
+		assert.ok(Number.isFinite(Date.parse(coordinator.calls[0].issuedAt)));
+		assert.deepEqual(coordinator.calls.map(({ issuedAt, ...command }) => command), [{ action: "pause", taskId: "task-1", expectedRevision: 1 }]);
 		const ack = await readControl(root, "cmd-ack");
 		assert.equal(ack.state, "rejected");
 		assert.equal(ack.detail, "unsupported-action");

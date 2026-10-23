@@ -26,7 +26,7 @@ const piDir = join(modules, "@earendil-works/pi-coding-agent");
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 const webPackage = await json(join(webDir, "package.json"));
 const piPackage = await json(join(piDir, "package.json"));
-const sourcePaths = ["scripts/tests/coordinator-webui-guest.mjs", ...["index.mjs", "coordinator.mjs", "webui-executor.mjs", "coverage.mjs", "model-json.mjs", "native-evidence.mjs", "native-session.mjs", "build-client.mjs", "client/markdown.mjs", "manifest.json", "experience.html", "client/entry.mjs", "client/outbox.mjs", "client/view-utils.mjs", "client/styles.css", "client/experience.mjs", "client/experience.css"].map((name) => `adapters/pi/coordinator-webui/${name}`)];
+const sourcePaths = ["scripts/tests/coordinator-webui-guest.mjs", ...["index.mjs", "coordinator.mjs", "webui-executor.mjs", "task-graph.mjs", "task-context.mjs", "observer-bridge.mjs", "protocol.generated.mjs", "coverage.mjs", "model-json.mjs", "native-evidence.mjs", "native-session.mjs", "build-client.mjs", "client/markdown.mjs", "manifest.json", "experience.html", "client/entry.mjs", "client/outbox.mjs", "client/view-utils.mjs", "client/styles.css", "client/experience.mjs", "client/experience.css"].map((name) => `adapters/pi/coordinator-webui/${name}`)];
 const sources = Object.fromEntries(await Promise.all(sourcePaths.map(async (path) => [path, createHash("sha256").update(await readFile(join(project, path))).digest("hex")])));
 const root = await mkdtemp(join(tmpdir(), "coordinator-webui-"));
 const home = join(root, "home"), agent = join(home, ".pi/agent"), cwd = join(root, "workspace");
@@ -114,13 +114,14 @@ async function main() {
 				assert.ok(++receipt.mock.requests <= 40, "local provider request budget");
 				const request = JSON.parse(body); assert.equal(request.model, "local"); assert.equal(request.stream, true);
 				const prompt = lastUserText(request.messages);
-				if (body.includes("You route a user's free-form requests")) {
+				if ((prompt.includes('{"currentInput":') && prompt.includes('"taskCandidates":[')) || (prompt.includes('{"userMessage":') && prompt.includes('"tasks":['))) {
 					receipt.mock.pluginIntentCalls = (receipt.mock.pluginIntentCalls ?? 0) + 1;
 					assert.ok(receipt.mock.pluginIntentCalls <= 8);
 					res.writeHead(200, { "Content-Type": "text/event-stream" });
-					const start = prompt.indexOf('{"userMessage":');
+					const start = Math.max(prompt.indexOf('{"userMessage":'), prompt.indexOf('{"currentInput":'));
 					assert.ok(start >= 0, "native host classifier envelope must retain the supplied JSON");
-					const input = JSON.parse(prompt.slice(start));
+					const envelope = JSON.parse(prompt.slice(start));
+					const input = { userMessage: envelope.userMessage ?? envelope.currentInput?.text, tasks: envelope.tasks ?? envelope.taskCandidates };
 					let intent = { action: "question", text: input.userMessage, answer: "Plugin classifier answered from the isolated fixture." };
 					if ([goalC, goalD, goalE].includes(input.userMessage)) intent = { action: "task", text: input.userMessage };
 					if (["FIXTURE_PAUSE_D", "FIXTURE_RESUME_D", "FIXTURE_CANCEL_E"].includes(input.userMessage)) {

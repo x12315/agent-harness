@@ -9,7 +9,7 @@ const initialState = {
 	refreshedAt: null,
 };
 
-const TERMINAL_PHASES = new Set(["verified", "failed", "cancelled"]);
+const TERMINAL_PHASES = new Set(["verified", "failed", "cancelled", "merged"]);
 const CONTROL_ACTIONS = Object.freeze([
 	{ action: "pause", label: "暂停" },
 	{ action: "resume", label: "继续" },
@@ -131,7 +131,8 @@ function renderFrame(frame, state, controls, onControl, bindings, fact) {
 	top.append(element("span", "badge kind", sourceLabel(frame.kind)));
 	top.append(element("strong", "frame-headline", headline));
 	const badges = element("div", "badges");
-	badges.append(element("span", `status ${frame.active ? "active" : "idle"}`, frame.active ? "进行中" : "已停止"));
+	const taskStatus = { queued: "等待执行", blocked: "等待依赖", paused: "已暂停", verified: "已验证完成", failed: "检查未通过", cancelled: "已取消", merged: "已合并", needs_reconciliation: "需要核对", stopping: "等待停止确认" };
+	badges.append(element("span", `status ${frame.active ? "active" : "idle"}`, frame.kind === "webui-task" ? taskStatus[frame.phase] || (frame.active ? "进行中" : "状态待核对") : frame.active ? "进行中" : "已停止"));
 	const elapsed = frameAge(frame);
 	if (elapsed !== undefined) badges.append(element("span", "age", `${shortAge(elapsed) || "<1s"} 前`));
 	if (frame.stale) badges.append(element("span", "status stale", "已过期"));
@@ -167,6 +168,13 @@ function renderFrame(frame, state, controls, onControl, bindings, fact) {
 		node.title = `任务引用 ${reference}`;
 		article.append(node);
 	}
+
+	const relatedTitle = (id) => (state.tasks || []).find((item) => item.owner === fact?.owner && item.taskId === id)?.objective || id;
+	if (fact?.mergeInto) article.append(element("p", "frame-relation", `已合并至：${relatedTitle(fact.mergeInto)}；原记录保留`));
+	for (const id of fact?.mergeSources || []) article.append(element("p", "frame-relation", `合并来源：${relatedTitle(id)}`));
+	if (fact?.derivedFrom) article.append(element("p", "frame-relation", `分叉来源：${relatedTitle(fact.derivedFrom.taskId)}（版本 ${fact.derivedFrom.revision}）`));
+	if (fact?.partOf) article.append(element("p", "frame-relation", `所属目标：${relatedTitle(fact.partOf.taskId)}`));
+	for (const dependency of fact?.dependencies || []) article.append(element("p", "frame-relation", `执行依赖：${relatedTitle(dependency.taskId)}（版本 ${dependency.revision}${dependency.satisfiedByRevision && dependency.satisfiedByRevision !== dependency.revision ? `，相同任务范围的版本 ${dependency.satisfiedByRevision} 已通过` : ""}）${dependency.condition ? `；${dependency.condition}` : ""}`));
 
 	const actions = allowedControlActions(state, frame);
 	if (actions.length) {

@@ -36,3 +36,5 @@ adapters/pi/observer-webui/protocol.generated.mjs:/tmp/ahsb-push/adapters/pi/obs
 adapters/pi/observer-webui/README.md:/tmp/ahsb-push/adapters/pi/observer-webui/README.md
 adapters/pi/observer-webui/scope.test.mjs:/tmp/ahsb-push/adapters/pi/observer-webui/scope.test.mjs
 scripts/tests/observer-layer-guest.mjs:/tmp/ahsb-push/scripts/tests/observer-layer-guest.mjs
+adapters/pi/coordinator-webui/task-graph.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/task-graph.mjs
+adapters/pi/coordinator-webui/task-context.mjs:/tmp/ahsb-push/adapters/pi/coordinator-webui/task-context.mjs

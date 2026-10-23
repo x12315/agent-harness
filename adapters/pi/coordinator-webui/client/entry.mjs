@@ -1,6 +1,6 @@
 import { Outbox } from "./outbox.mjs";
 import { markdown } from "./markdown.mjs";
-import { statusLabel, gapLabel, taskControlText, taskCounts, elapsedLabel, nativeEvidenceFor } from "./view-utils.mjs";
+import { statusLabel, gapLabel, taskControlText, taskCounts, elapsedLabel, nativeEvidenceFor, taskRelations } from "./view-utils.mjs";
 
 const node = (tag, text, className) => {
 	const element = document.createElement(tag);
@@ -8,6 +8,7 @@ const node = (tag, text, className) => {
 	if (className) element.className = className;
 	return element;
 };
+const operationLabels = { task: "新建", fork: "分叉", decompose: "拆分", revise: "调整范围", pause: "暂停", resume: "继续", cancel: "取消", add_dependency: "更新依赖", remove_dependency: "移除依赖", merge: "合并", message: "转交消息", reorder: "调整顺序" };
 const timeLabel = (value) => value == null || !Number.isFinite(new Date(value).getTime()) ? "—" : new Date(value).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const button = (text, handler, className = "co-button") => {
 	const element = node("button", text, className);
@@ -86,6 +87,8 @@ export default {
 		let outbox, workspace, state = { inputs: [], tasks: [] }, disposed = false, refreshTimer;
 		let taskSignature = "", conversationSignature = "", receivedAt = null;
 		const inFlight = new Map();
+		const forkDrafts = new Map();
+		const mergeDrafts = new Map();
 		try { outbox = new Outbox(sessionStorage); }
 		catch { feedback.textContent = "浏览器无法保存待发记录，暂不发送。请允许此页面使用会话存储后重新加载。"; }
 		const announce = (text) => { feedback.textContent = text; };
@@ -94,16 +97,16 @@ export default {
 			if (!force && Date.now() - (inFlight.get(item.requestId) || 0) < 15000) return;
 			inFlight.set(item.requestId, Date.now());
 			try {
-				Promise.resolve(ctx.send({ type: "coordinator-input", ...item })).catch(() => {
+				Promise.resolve(ctx.send({ type: item.operationPlan ? "coordinator-operation" : "coordinator-input", ...item })).catch(() => {
 					if (!disposed) { inFlight.delete(item.requestId); announce("连接中断，请求仍保存在本机。点“刷新”可用原编号重试。"); }
 				});
 			} catch { inFlight.delete(item.requestId); announce("发送未确认，请求已保留。点“刷新”重试，不会重复创建请求。"); }
 		};
-		const enqueue = (text) => {
+		const enqueue = (text, operationPlan) => {
 			if (!outbox || !workspace || !text.trim()) return false;
 			if (text.length > 16000) { announce("这条请求超过 16000 字，请缩短后发送。"); return false; }
 			try {
-				const item = { requestId: crypto.randomUUID(), text, workspace };
+				const item = { requestId: crypto.randomUUID(), text, workspace, ...(operationPlan ? { operationPlan } : {}) };
 				outbox.add(item);
 				announce("正在保存，尚未确认受理…");
 				renderConversation();
@@ -155,15 +158,128 @@ export default {
 			if (nearBottom) { conversation.scrollTop = conversation.scrollHeight; jump.hidden = true; }
 			else { conversation.scrollTop = scrollTop; jump.hidden = false; }
 		}
+		function renderFork(task) {
+			const panel = details("分叉新任务", `${task.id}:fork`);
+			const draft = forkDrafts.get(task.id) || { text: "", disposition: "keep", wait: false, revision: task.revision };
+			if (!draft.text && draft.disposition === "keep" && !draft.wait) draft.revision = task.revision;
+			forkDrafts.set(task.id, draft);
+			const forkForm = node("form", null, "co-fork-form");
+			const targetLabel = node("label", "新任务的目标和验收要求");
+			const target = node("textarea");
+			target.setAttribute("aria-label", `新分支要求：${task.objective}`);
+			target.rows = 3; target.maxLength = 8000; target.required = true; target.value = draft.text; target.dataset.forkField = "text";
+			target.addEventListener("input", () => { draft.text = target.value; });
+			targetLabel.append(target);
+			const dispositionLabel = node("label", "原任务如何处理");
+			const disposition = node("select"); disposition.dataset.forkField = "disposition";
+			disposition.setAttribute("aria-label", `原任务处置：${task.objective}`);
+			for (const [value, label] of [["keep", "保持当前状态"], ["resume", "继续原任务"], ["pause", "暂停原任务"], ["cancel", "取消原任务后续执行"]]) {
+				const option = node("option", label); option.value = value;
+				option.disabled = value !== "keep" && ["verified", "failed", "cancelled", "merged"].includes(task.status);
+				disposition.append(option);
+			}
+			disposition.value = draft.disposition;
+			disposition.addEventListener("change", () => { draft.disposition = disposition.value; });
+			dispositionLabel.append(disposition);
+			const waitLabel = node("label", null, "co-fork-wait");
+			const wait = node("input"); wait.type = "checkbox"; wait.checked = draft.wait; wait.dataset.forkField = "wait";
+			wait.addEventListener("change", () => { draft.wait = wait.checked; });
+			waitLabel.append(wait, document.createTextNode("等待原任务当前版本验证完成后再执行"));
+			const submitFork = node("button", "提交分叉", "co-button"); submitFork.type = "submit";
+			submitFork.disabled = !outbox || !workspace || draft.revision !== task.revision;
+			if (draft.revision !== task.revision) {
+				forkForm.append(paragraph("来源版本已经变化。请核对任务的新要求后再使用当前版本分叉。", "co-gap"), button("使用当前版本", () => { draft.revision = task.revision; taskSignature = ""; renderTasks(); }));
+			}
+			forkForm.append(paragraph(`引用来源版本 ${draft.revision}，原任务要求不会全部复制为新分支交付物。`, "co-muted"), targetLabel, dispositionLabel, waitLabel, paragraph("保留来源版本；分支独立验收。建立分支不代表已启动或允许并行写入。", "co-muted"), submitFork);
+			forkForm.addEventListener("submit", (event) => {
+				event.preventDefault();
+				if (!target.value.trim() || draft.revision !== task.revision) return;
+				const operation = { action: "fork", targetId: task.id, expectedRevision: task.revision, text: target.value.trim(), sourceDisposition: disposition.value, ...(wait.checked ? { dependsOn: [{ taskId: task.id, expectedRevision: task.revision, condition: "原任务当前版本验证完成" }] } : {}) };
+				const dispositionText = { keep: "保持当前状态", resume: "继续", pause: "暂停", cancel: "取消后续执行" }[disposition.value];
+				if (enqueue(`从任务「${task.objective}」分叉：${target.value.trim()}。原任务${dispositionText}。${wait.checked ? "分支等待原任务当前版本验证完成。" : "来源关系本身不要求等待原任务完成。"}`, { action: "plan", operations: [operation] })) {
+					draft.text = ""; target.value = "";
+					announce("已发送分叉请求，等待保存和关系校验；尚未确认建立或启动。");
+				}
+			});
+			panel.append(forkForm);
+			return panel;
+		}
+		function renderMerge(task) {
+			const panel = details("与其他任务合并", `${task.id}:merge`);
+			const draft = mergeDrafts.get(task.id) || { revision: task.revision, sources: {} };
+			if (!Object.keys(draft.sources).length) draft.revision = task.revision;
+			mergeDrafts.set(task.id, draft);
+			const mergeForm = node("form", null, "co-fork-form co-merge-form");
+			mergeForm.append(paragraph("保留当前任务作为入口，合并所有选中任务的要求和证据。先确认执行停止，再继续整合；不自动合并代码或回滚改动。", "co-muted"));
+			if (draft.revision !== task.revision) mergeForm.append(paragraph("保留任务的版本已变化，请核对后使用当前版本。", "co-gap"), button("使用当前合并版本", () => { draft.revision = task.revision; taskSignature = ""; renderTasks(); }));
+			for (const other of state.tasks.filter((item) => item.id !== task.id && item.status !== "merged" && !item.mergeInto)) {
+				const label = node("label", null, "co-fork-wait");
+				const choice = node("input"); choice.type = "checkbox"; choice.checked = draft.sources[other.id] != null; choice.dataset.forkField = `merge-${other.id}`;
+				choice.setAttribute("aria-label", `合并任务：${other.objective}`);
+				choice.addEventListener("change", () => { if (choice.checked) draft.sources[other.id] = other.revision; else delete draft.sources[other.id]; });
+				label.append(choice, document.createTextNode(`${other.objective}${choice.checked && draft.sources[other.id] !== other.revision ? "（版本变化，请重新勾选）" : ""}`)); mergeForm.append(label);
+			}
+			if (Object.keys(draft.sources).length) mergeForm.append(button("清除合并选择", () => { draft.sources = {}; taskSignature = ""; renderTasks(); }));
+			const submit = node("button", "确认合并所选任务", "co-button"); submit.type = "submit"; submit.disabled = !outbox || !workspace || draft.revision !== task.revision;
+			mergeForm.append(submit);
+			mergeForm.addEventListener("submit", (event) => {
+				event.preventDefault();
+				const sources = Object.entries(draft.sources).map(([taskId, expectedRevision]) => ({ taskId, expectedRevision }));
+				if (!sources.length) { announce("请至少选择另一项任务，原任务尚未改变。"); return; }
+				if (draft.revision !== task.revision) return;
+				const names = sources.map(({ taskId }) => state.tasks.find((item) => item.id === taskId)?.objective || "来源任务");
+				if (enqueue(`明确将「${names.join("、")}」合并到「${task.objective}」，保留所有要求、约束、证据和历史；等待执行侧停止确认，不要求回滚已有改动。`, { action: "plan", operations: [{ action: "merge", targetId: task.id, expectedRevision: draft.revision, sources }] })) announce("合并请求已发送；等待整组校验和保存，不代表执行已经切换。");
+			});
+			panel.append(mergeForm); return panel;
+		}
+		function renderCoordination() {
+			const nodes = [];
+			for (const notice of (state.negotiations || []).filter((item) => item.status === "open").slice(-5)) {
+				const card = node("section", null, "co-coordination-notice");
+				card.append(node("h3", "可能重复的任务"), paragraph(notice.text), paragraph((notice.taskIds || []).map((id) => state.tasks.find((item) => item.id === id)?.objective || id).join("、"), "co-muted")); nodes.push(card);
+			}
+			for (const proposal of (state.proposals || []).slice(-8)) {
+				const card = node("section", null, "co-coordination-notice"); card.dataset.proposalId = proposal.id;
+				card.append(node("h3", `协商方案 · ${{ pending: "等待确认", accepted: "已采用", rejected: "已拒绝" }[proposal.status] || "状态待核对"}`), paragraph(proposal.text));
+				const preview = details("查看涉及的操作", `${proposal.id}:operations`);
+				for (const operation of proposal.operationPlan?.operations || []) preview.append(paragraph(`${operationLabels[operation.action] || "任务调整"}：${state.tasks.find((item) => item.id === operation.targetId)?.objective || operation.text || "关联任务"}${operation.sources?.length ? `；涉及 ${operation.sources.map((source) => state.tasks.find((item) => item.id === source.taskId)?.objective || source.taskId).join("、")}` : ""}`));
+				card.append(preview);
+				if (proposal.status === "pending") for (const [action, label] of [["accept_proposal", "确认采用"], ["reject_proposal", "不采用"]]) {
+					card.append(button(label, () => { if (enqueue(`${label}协商方案「${proposal.text}」；采用时整组校验，不能只应用其中一部分。`, { action: "plan", operations: [{ action, proposalId: proposal.id, expectedRevision: proposal.revision }] })) announce("方案处置请求已发送，尚未确认应用。"); }));
+				}
+				nodes.push(card);
+			}
+			for (const message of (state.messages || []).slice(-8)) {
+				const card = node("section", null, "co-coordination-notice");
+				card.append(node("h3", "任务间协作消息"), paragraph(message.text), paragraph((message.fromTasks || []).map((ref) => `来源「${state.tasks.find((item) => item.id === ref.taskId)?.objective || ref.taskId}」版本 ${ref.revision}`).join("、"), "co-muted"), paragraph(`协调器转交给「${state.tasks.find((item) => item.id === message.toTaskId)?.objective || message.toTaskId}」：${message.status === "injected" ? "已注入下一轮执行上下文，未宣称对方已阅读或认可" : "待下一执行边界注入"}`, "co-muted")); nodes.push(card);
+			}
+			return nodes;
+		}
 		function renderTask(task) {
 			const article = node("article", null, "co-task");
 			article.dataset.taskId = task.id;
 			const heading = node("div", null, "co-task-title");
 			heading.append(node("h3", task.objective), node("span", statusLabel(task.status), `co-status co-status-${task.status}`));
 			article.append(heading);
+			const relationships = taskRelations(task, state.tasks);
+			if (relationships.length) {
+				const relations = node("section", null, "co-relations"); relations.setAttribute("aria-label", "任务关系");
+				for (const relation of relationships) { const row = paragraph(relation.text, "co-relation"); row.dataset.relation = relation.kind; relations.append(row); }
+				article.append(relations);
+			}
 			const original = task.sourceText ?? state.inputs.find((item) => item.id === task.sourceInputId || item.id === task.inputId)?.text;
-			article.append(node("h4", "原始需求"), paragraph(original ?? task.objective));
+			article.append(node("h4", task.sourceInputText && task.sourceInputText !== original ? "本任务范围" : "原始需求"), paragraph(original ?? task.objective));
 			if (!original) article.append(paragraph("未提供独立原文；此处显示任务目标，对话中保留已收件原文。", "co-muted"));
+			if (task.sourceInputText && task.sourceInputText !== original) {
+				const source = details("关联的完整用户原话", `${task.id}:source`); source.append(paragraph(task.sourceInputText)); article.append(source);
+			}
+			if (task.constraints?.length) article.append(node("h4", "适用约束"), ...task.constraints.map((value) => paragraph(value)));
+			if (task.acceptance?.length) article.append(node("h4", "验收要求"), ...task.acceptance.map((value) => paragraph(value)));
+			if (task.scopeHistory?.length) {
+				const history = details("历史范围（不作为当前交付要求）", `${task.id}:scope`);
+				for (const scope of task.scopeHistory) history.append(paragraph(typeof scope === "string" ? scope : scope.sourceText || scope.objective || scope.text || "此前范围已保留"));
+				article.append(history);
+			}
 			if (task.amendments?.length) {
 				const amendments = details(`补充与调整（${task.amendments.length}）`, `${task.id}:amendments`);
 				for (const amendment of task.amendments) amendments.append(paragraph(amendment.source === "coverage-review" ? "证据检查要求补齐未覆盖的原始需求。" : amendment.text));
@@ -177,7 +293,7 @@ export default {
 				article.append(progress);
 			}
 			const timing = node("dl", null, "co-timing");
-			const terminal = ["verified", "failed", "cancelled"].includes(task.status);
+			const terminal = ["verified", "failed", "cancelled", "merged"].includes(task.status);
 			const endedAt = task.completedAt ?? task.finishedAt;
 			const elapsed = terminal && task.startedAt != null && endedAt == null ? "未提供结束时间" : elapsedLabel(task.startedAt, endedAt ?? Date.now());
 			for (const [label, value] of [["开始", timeLabel(task.startedAt)], ["已用时", elapsed], ["最近检查", timeLabel(task.checkpoint?.at)], ["下次检查", terminal ? "已结束" : task.nextCheckAt ? timeLabel(task.nextCheckAt) : "等待安排"]]) {
@@ -218,7 +334,7 @@ export default {
 				const controls = node("div", null, "co-task-controls");
 				for (const [action, label] of task.status === "paused" ? [["resume", "继续"], ["cancel", "取消任务"]] : [["pause", "暂停"], ["cancel", "取消任务"]]) {
 					const control = button(label, () => {
-						if (enqueue(taskControlText(action, task))) announce(`已发送“${label}”请求，等待受理和执行侧确认。`);
+						if (enqueue(taskControlText(action, task), { action: "plan", operations: [{ action, targetId: task.id, expectedRevision: task.revision }] })) announce(`已发送“${label}”请求，等待受理和执行侧确认。`);
 					});
 					control.dataset.action = action;
 					control.disabled = !outbox || !workspace || task.status === "stopping";
@@ -228,22 +344,30 @@ export default {
 				article.append(controls);
 				if (task.status === "stopping") article.append(paragraph("停止请求仍在确认，状态确认前不重复派发。", "co-muted"));
 			}
+			if (task.status !== "merged" && !task.mergeInto) article.append(renderFork(task), renderMerge(task));
 			return article;
 		}
 		function renderTasks() {
-			const signature = JSON.stringify([state.tasks, state.inputs.map(({ id, text }) => [id, text]), workspace, !!outbox]);
+			const signature = JSON.stringify([state.tasks, state.proposals, state.messages, state.negotiations, state.inputs.map(({ id, text }) => [id, text]), workspace, !!outbox]);
 			if (signature === taskSignature) return;
 			taskSignature = signature;
 			const opened = new Set([...taskList.querySelectorAll("details[open]")].map((entry) => entry.dataset.key));
 			const scrollTop = taskList.scrollTop;
 			const focusedTask = document.activeElement?.closest?.("[data-task-id]")?.dataset.taskId;
 			const focusedAction = document.activeElement?.dataset.action;
-			const rank = (task) => ["verified", "failed", "cancelled"].includes(task.status) ? 2 : task.status === "paused" || task.status === "queued" ? 1 : 0;
+			const focusedForkField = document.activeElement?.dataset.forkField;
+			const selection = focusedForkField === "text" ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+			const rank = (task) => ["verified", "failed", "cancelled", "merged"].includes(task.status) ? 2 : task.status === "paused" || task.status === "queued" ? 1 : 0;
 			const ordered = [...state.tasks].sort((a, b) => rank(a) - rank(b) || (b.createdAt || 0) - (a.createdAt || 0));
-			taskList.replaceChildren(...ordered.map(renderTask));
+			taskList.replaceChildren(...renderCoordination(), ...ordered.map(renderTask));
 			if (!state.tasks.length) taskList.append(paragraph("任务会在这里继续。发送明确的工作需求后，可查看进展、检查时间与证据。", "co-sidebar-empty"));
 			for (const entry of taskList.querySelectorAll("details")) entry.open = opened.has(entry.dataset.key);
 			taskList.scrollTop = scrollTop;
+			if (focusedTask && focusedForkField) {
+				const replacement = [...taskList.querySelectorAll("[data-fork-field]")].find((control) => control.dataset.forkField === focusedForkField && control.closest("[data-task-id]").dataset.taskId === focusedTask);
+				replacement?.focus({ preventScroll: true });
+				if (replacement && selection) replacement.setSelectionRange(...selection);
+			}
 			if (focusedTask && focusedAction) {
 				const replacement = [...taskList.querySelectorAll("[data-action]")].find((control) => control.dataset.action === focusedAction && control.closest("[data-task-id]").dataset.taskId === focusedTask);
 				replacement?.focus({ preventScroll: true });

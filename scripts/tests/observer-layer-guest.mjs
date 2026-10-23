@@ -250,10 +250,11 @@ async function main() {
 				const request = JSON.parse(body);
 				assert.equal(request.model, "local"); assert.equal(request.stream, true);
 				const prompt = lastUserText(request.messages);
-				if (body.includes("You route a user's free-form requests")) {
-					const at = prompt.indexOf('{"userMessage":');
+				if ((prompt.includes('{"currentInput":') && prompt.includes('"taskCandidates":[')) || (prompt.includes('{"userMessage":') && prompt.includes('"tasks":['))) {
+					const at = Math.max(prompt.indexOf('{"userMessage":'), prompt.indexOf('{"currentInput":'));
 					assert.ok(at >= 0, "classifier JSON envelope required");
-					const input = JSON.parse(prompt.slice(at));
+					const envelope = JSON.parse(prompt.slice(at));
+					const input = { userMessage: envelope.userMessage ?? envelope.currentInput?.text, tasks: envelope.tasks ?? envelope.taskCandidates };
 					receipt.mock.classifications.push(input.userMessage);
 					assert.equal(input.userMessage, objective, "only the declared fixture objective is routed");
 					res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });

@@ -27,7 +27,7 @@ export const SCHEMA = Object.freeze({
 export const CONTROL_ACTIONS = Object.freeze(["ack", "pause", "resume", "cancel", "summary"]);
 const EVENT_TYPES = new Set(["control.requested", "control.applied", "control.rejected", "task.fact-changed", "attention", "note"]);
 const ACTIVE_TASK_STATES = new Set(["starting", "running", "stopping"]);
-const TERMINAL_TASK_STATES = new Set(["verified", "failed", "cancelled"]);
+const TERMINAL_TASK_STATES = new Set(["verified", "failed", "cancelled", "merged"]);
 const IDENTIFIER = /^[A-Za-z0-9_.:-]{1,120}$/;
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);

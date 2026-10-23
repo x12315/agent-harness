@@ -1,7 +1,7 @@
 const STATUS_LABELS = {
 	pending: "已收件", classified: "已安排", question: "已回答", clarify: "需要你补充",
-	queued: "等待执行", starting: "正在启动", running: "执行中", stopping: "等待停止确认",
-	paused: "已暂停", cancelled: "已取消", failed: "未通过检查", verified: "已验证完成",
+	queued: "等待执行", blocked: "等待依赖", starting: "正在启动", running: "执行中", stopping: "等待停止确认",
+	paused: "已暂停", cancelled: "已取消", merged: "已合并", failed: "未通过检查", verified: "已验证完成",
 	needs_reconciliation: "需要核对", passed: "已通过", missing: "证据不足", unknown: "尚未确认",
 };
 
@@ -31,11 +31,24 @@ export function taskControlText(action, task) {
 	return `请${verb}任务「${task.objective}」（任务 ${task.id}）。${action === "cancel" ? "只取消后续执行，不要求撤销已有改动。" : "保留原始需求和所有补充。"}`;
 }
 
+/** Render provenance, decomposition and execution dependencies as distinct relationships. */
+export function taskRelations(task, tasks = []) {
+	const title = (id) => tasks.find((item) => item.id === id)?.objective || "关联任务暂不可用";
+	const rows = [];
+	if (task.mergeInto) rows.push({ kind: "merged_into", text: `已合并至：${title(task.mergeInto)}；原要求和记录仍保留` });
+	for (const id of task.mergeSources || []) rows.push({ kind: "merged_source", text: `合并来源：${title(id)}；全部要求仍需验收` });
+	if (task.derivedFrom) rows.push({ kind: "derived_from", text: `分叉来源：${title(task.derivedFrom.taskId)}（版本 ${task.derivedFrom.revision}）` });
+	if (task.partOf) rows.push({ kind: "part_of", text: `所属目标：${title(task.partOf.taskId)}` });
+	for (const id of task.children || []) rows.push({ kind: "child", text: `子任务：${title(id)}；完成后仍需整体验收` });
+	for (const dependency of task.dependencies || []) rows.push({ kind: "depends_on", text: `执行依赖：${title(dependency.taskId)}（版本 ${dependency.revision}${dependency.satisfiedByRevision && dependency.satisfiedByRevision !== dependency.revision ? `，相同任务范围的版本 ${dependency.satisfiedByRevision} 已通过` : ""}）${dependency.condition ? `；${dependency.condition}` : ""}` });
+	return rows;
+}
+
 /** Count occupied, waiting, and evidenced-complete tasks independently. */
 export function taskCounts(tasks = []) {
 	return {
 		active: tasks.filter((task) => ["starting", "running", "stopping", "needs_reconciliation"].includes(task.status)).length,
-		waiting: tasks.filter((task) => ["queued", "paused"].includes(task.status)).length,
+		waiting: tasks.filter((task) => ["queued", "blocked", "paused"].includes(task.status)).length,
 		complete: tasks.filter((task) => task.status === "verified").length,
 	};
 }

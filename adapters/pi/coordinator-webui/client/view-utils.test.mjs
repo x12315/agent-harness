@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { statusLabel, gapLabel, taskControlText, taskCounts, elapsedLabel, nativeEvidenceFor } from "./view-utils.mjs";
+import { statusLabel, gapLabel, taskControlText, taskCounts, elapsedLabel, nativeEvidenceFor, taskRelations } from "./view-utils.mjs";
 
 test("protocol statuses and gaps use plain Chinese without raw English failures", () => {
 	assert.equal(statusLabel("running"), "执行中");
@@ -26,6 +26,15 @@ test("task controls remain natural-language messages with explicit objective and
 
 test("counts distinguish evidence-backed completion from ended or uncertain execution", () => {
 	assert.deepEqual(taskCounts(["running", "stopping", "needs_reconciliation", "queued", "paused", "verified", "failed", "cancelled"].map((status) => ({ status }))), { active: 3, waiting: 2, complete: 1 });
+});
+
+test("relations distinguish derivation, decomposition and execution gates", () => {
+	const task = { derivedFrom: { taskId: "a", revision: 2 }, partOf: { taskId: "p", revision: 1 }, children: ["c"], dependencies: [{ taskId: "a", revision: 2, condition: "根因验证完成" }] };
+	const rows = taskRelations(task, [{ id: "a", objective: "调查" }, { id: "p", objective: "完整目标" }, { id: "c", objective: "子工作" }]);
+	assert.deepEqual(rows.map((row) => row.kind), ["derived_from", "part_of", "child", "depends_on"]);
+	assert.match(rows[0].text, /版本 2/); assert.match(rows[3].text, /根因验证/);
+	assert.deepEqual(taskCounts([{ status: "blocked" }]), { active: 0, waiting: 1, complete: 0 });
+	assert.equal(statusLabel("blocked"), "等待依赖");
 });
 
 test("wall time handles zero, unknown starts and clock skew", () => {

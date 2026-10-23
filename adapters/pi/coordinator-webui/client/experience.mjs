@@ -3,7 +3,7 @@ import view from "./entry.mjs";
 const handlers = new Set();
 const key = "pi-coordinator-experience-client";
 let clientId;
-try { clientId = localStorage.getItem(key); if (!clientId) { clientId = crypto.randomUUID(); localStorage.setItem(key, clientId); } }
+try { clientId = sessionStorage.getItem(key); if (!clientId) { clientId = crypto.randomUUID(); sessionStorage.setItem(key, clientId); } }
 catch { clientId = crypto.randomUUID(); }
 let socket, reconnect, disposed = false;
 const pending = [];
